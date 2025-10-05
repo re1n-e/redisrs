@@ -23,10 +23,7 @@ async fn main() {
                     while let Some(result) = framed.next().await {
                         match result {
                             Ok(value) => {
-                                framed
-                                    .send(RedisValueRef::String(Bytes::from("PONG")))
-                                    .await
-                                    .unwrap();
+                                framed.send(value).await.unwrap();
                             }
                             Err(e) => {
                                 eprintln!("Parse error: {:?}", e);
