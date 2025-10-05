@@ -1,5 +1,8 @@
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use bytes::Bytes;
+use futures::{SinkExt, StreamExt}; // Add this dependency
+use redis::resp::{RedisValueRef, RespParser};
 use tokio::net::TcpListener;
+use tokio_util::codec::{Encoder, Framed};
 
 #[tokio::main]
 async fn main() {
@@ -9,19 +12,30 @@ async fn main() {
         let stream = listener.accept().await;
 
         match stream {
-            Ok((mut stream, addr)) => {
+            Ok((stream, addr)) => {
                 println!("accepted new connection from: {addr}");
 
                 tokio::spawn(async move {
-                    let mut buf = [0; 512];
-                    loop {
-                        let read_count = stream.read(&mut buf).await.unwrap();
-                        if read_count == 0 {
-                            break;
-                        }
+                    // Wrap the stream with the RespParser codec
+                    let mut framed = Framed::new(stream, RespParser);
 
-                        stream.write(b"+PONG\r\n").await.unwrap();
+                    // Read parsed Redis values from the stream
+                    while let Some(result) = framed.next().await {
+                        match result {
+                            Ok(value) => {
+                                framed
+                                    .send(RedisValueRef::String(Bytes::from("PONG")))
+                                    .await
+                                    .unwrap();
+                            }
+                            Err(e) => {
+                                eprintln!("Parse error: {:?}", e);
+                                break;
+                            }
+                        }
                     }
+
+                    println!("Connection closed: {addr}");
                 });
             }
             Err(e) => {
