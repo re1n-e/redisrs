@@ -46,6 +46,7 @@ impl KeyValue {
                 }
                 _ => Duration::from_secs(0), // invalid, will expire immediately
             };
+            println!("Duration {:?}", duration);
             Set {
                 value,
                 expiry: Some(Instant::now() + duration),
