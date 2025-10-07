@@ -3,13 +3,13 @@ use crate::resp::RedisValueRef;
 use bytes::Bytes;
 use std::sync::Arc;
 
-enum Command {
+enum Command<'a> {
     Ping,
     Echo(Bytes),
     Set {
         key: Bytes,
         value: Bytes,
-        expiry: Option<(String, i64)>,
+        expiry: Option<(&'a Bytes, i64)>,
     },
     Get(Bytes),
 }
@@ -41,18 +41,11 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                     RedisValueRef::String(v) => v.clone(),
                     _ => return None,
                 };
-                if let Some(_) = arr.get(3) {
-                    println!("Some");
-                }
-                if let Some(_) = arr.get(4) {
-                    println!("2Some");
-                }
                 let expiry = if arr.len() == 5 {
                     if let (RedisValueRef::String(ty), RedisValueRef::Int(time)) =
                         (&arr[3], &arr[4])
                     {
-                        let ty_str = std::str::from_utf8(ty).ok()?.to_uppercase();
-                        Some((ty_str, *time))
+                        Some((ty, *time))
                     } else {
                         None
                     }
@@ -91,11 +84,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         Command::Set { key, value, expiry } => {
             redis
                 .kv
-                .insert_entry(
-                    key,
-                    RedisValueRef::String(value),
-                    expiry.as_ref().map(|(ty, t)| (ty.as_bytes(), *t)),
-                )
+                .insert_entry(key, RedisValueRef::String(value), expiry)
                 .await;
             Some(RedisValueRef::String(Bytes::from("OK")))
         }
