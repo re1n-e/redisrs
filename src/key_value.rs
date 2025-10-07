@@ -45,7 +45,6 @@ impl KeyValue {
                     return;
                 }
                 b"PXAT" => {
-                    // Unix timestamp in milliseconds
                     let target = Instant::now() + Duration::from_millis(time as u64);
                     entries.insert(
                         key,
@@ -56,7 +55,7 @@ impl KeyValue {
                     );
                     return;
                 }
-                _ => Duration::from_secs(0), // invalid, will expire immediately
+                _ => Duration::from_secs(0),
             };
             Set {
                 value,
@@ -78,12 +77,8 @@ impl KeyValue {
         if let Some(set) = entries.get(key) {
             if let Some(expiry) = set.expiry {
                 if Instant::now() > expiry {
-                    // Entry has expired
-                    drop(entries); // Release read lock
-
-                    // Acquire write lock to remove expired entry
-                    let mut entries = self.entries.write().await;
-                    entries.remove(key);
+                    drop(entries);
+                    self.delete_entry(key).await;
                     return None;
                 }
             }
