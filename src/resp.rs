@@ -234,6 +234,9 @@ impl Encoder<RedisValueRef> for RespParser {
             RedisValueRef::NullBulkString => {
                 dst.extend_from_slice(b"$-1\r\n");
             }
+            RedisValueRef::NullArray => {
+                dst.extend_from_slice(b"*-1\r\n");
+            }
             _ => {}
         }
         Ok(())
