@@ -88,7 +88,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             redis
                 .kv
                 .insert_entry(
-                    RedisValueRef::String(key),
+                    key,
                     RedisValueRef::String(value),
                     expiry.as_ref().map(|(ty, t)| (ty.as_bytes(), *t)),
                 )
@@ -96,7 +96,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             Some(RedisValueRef::String(Bytes::from("OK")))
         }
 
-        Command::Get(key) => match redis.kv.get_entry(&RedisValueRef::String(key)).await {
+        Command::Get(key) => match redis.kv.get_entry(&key).await {
             Some(RedisValueRef::String(s)) => Some(RedisValueRef::BulkString(s)),
             _ => Some(RedisValueRef::NullBulkString),
         },
