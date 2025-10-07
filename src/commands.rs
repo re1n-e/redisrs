@@ -32,16 +32,6 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
         }
 
         "SET" => {
-            if arr.len() >= 5 {
-                println!(
-                    "{:?} {:?} {:?} {:?} {:?}",
-                    arr.get(0),
-                    arr.get(1),
-                    arr.get(2),
-                    arr.get(3),
-                    arr.get(4)
-                );
-            }
             if arr.len() >= 3 {
                 let key = match &arr[1] {
                     RedisValueRef::String(k) => k.clone(),
@@ -53,7 +43,9 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 };
                 let expiry = if arr.len() == 5 {
                     match (&arr[3], &arr[4]) {
-                        (RedisValueRef::String(s), RedisValueRef::Int(i)) => Some((s, *i)),
+                        (RedisValueRef::String(s), RedisValueRef::String(i)) => {
+                            Some((s, std::str::from_utf8(i).unwrap().parse::<i64>().unwrap()))
+                        }
                         _ => None,
                     }
                 } else {
