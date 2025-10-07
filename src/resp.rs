@@ -231,6 +231,13 @@ impl Encoder<RedisValueRef> for RespParser {
                 dst.extend_from_slice(&s);
                 dst.extend_from_slice(b"\r\n");
             }
+            RedisValueRef::Array(s) => {
+                dst.extend_from_slice(b"*");
+                dst.extend_from_slice(s.len().to_string().as_bytes());
+                for val in s {
+                    self.encode(val, dst)?;
+                }
+            }
             RedisValueRef::NullBulkString => {
                 dst.extend_from_slice(b"$-1\r\n");
             }

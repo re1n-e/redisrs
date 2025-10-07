@@ -13,6 +13,11 @@ enum Command<'a> {
     },
     Get(Bytes),
     RPUSH(Bytes),
+    LRANGE {
+        key: Bytes,
+        start: usize,
+        end: usize,
+    },
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -73,6 +78,27 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+        "LRANGE" => {
+            if arr.len() == 4 {
+                match (&arr[1], &arr[2], &arr[3]) {
+                    (
+                        RedisValueRef::String(key),
+                        RedisValueRef::String(start),
+                        RedisValueRef::String(end),
+                    ) => Some(Command::LRANGE {
+                        key: key.clone(),
+                        start: std::str::from_utf8(start)
+                            .unwrap()
+                            .parse::<usize>()
+                            .unwrap(),
+                        end: std::str::from_utf8(end).unwrap().parse::<usize>().unwrap(),
+                    }),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
 
         _ => None,
     }
@@ -105,9 +131,18 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         Command::RPUSH(key) => {
             let mut i = 0;
             for j in 2..arr.len() {
-                i = redis.add_list(&key, arr[j].clone()).await;
+                match &arr[j] {
+                    RedisValueRef::String(s) => {
+                        i = redis.add_list(&key, s.clone()).await;
+                    }
+                    _ => return None,
+                }
             }
             Some(RedisValueRef::Int(i))
+        }
+
+        Command::LRANGE { key, start, end } => {
+            Some(RedisValueRef::Array(redis.lrange(&key, start, end).await))
         }
     }
 }
