@@ -12,6 +12,7 @@ enum Command<'a> {
         expiry: Option<(&'a Bytes, i64)>,
     },
     Get(Bytes),
+    RPUSH(Bytes),
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -65,6 +66,14 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
         }
 
+        "RPUSH" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
+                Some(Command::RPUSH(k.clone()))
+            } else {
+                None
+            }
+        }
+
         _ => None,
     }
 }
@@ -92,5 +101,12 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             Some(RedisValueRef::String(s)) => Some(RedisValueRef::BulkString(s)),
             _ => Some(RedisValueRef::NullBulkString),
         },
+
+        Command::RPUSH(key) => {
+            for j in 2..arr.len() {
+                redis.add_list(&key, arr[j].clone()).await;
+            }
+            Some(RedisValueRef::Int((arr.len() - 2) as i64))
+        }
     }
 }

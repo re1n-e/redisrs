@@ -77,7 +77,7 @@ impl KeyValue {
         if let Some(entry) = entries.get_mut(key) {
             if let Some(expiry) = entry.expiry {
                 if Instant::now() >= expiry {
-                    entries.remove(key); 
+                    entries.remove(key);
                     return None;
                 }
             } else {
