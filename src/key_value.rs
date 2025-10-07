@@ -23,14 +23,14 @@ impl KeyValue {
         &self,
         key: RedisValueRef,
         value: RedisValueRef,
-        expiry: Option<(&String, i64)>,
+        expiry: Option<(&[u8], i64)>,
     ) {
         let mut entries = self.entries.write().await;
 
         let set = if let Some((ty, time)) = expiry {
-            let duration = match ty.as_str() {
-                "EX" => Duration::from_secs(time as u64),
-                "PX" => Duration::from_millis(time as u64),
+            let duration = match ty {
+                b"EX" => Duration::from_secs(time as u64),
+                b"PX" => Duration::from_millis(time as u64),
                 _ => Duration::from_secs(0), // invalid
             };
             Set {
