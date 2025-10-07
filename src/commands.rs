@@ -32,7 +32,16 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
         }
 
         "SET" => {
-            println!("len: {}", arr.len());
+            if arr.len() >= 5 {
+                println!(
+                    "{:?} {:?} {:?} {:?} {:?}",
+                    arr.get(0),
+                    arr.get(1),
+                    arr.get(2),
+                    arr.get(3),
+                    arr.get(4)
+                );
+            }
             if arr.len() >= 3 {
                 let key = match &arr[1] {
                     RedisValueRef::String(k) => k.clone(),

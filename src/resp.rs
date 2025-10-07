@@ -6,7 +6,7 @@ use tokio_util::codec::{Decoder, Encoder};
 pub type Value = Bytes;
 pub type Key = Bytes;
 
-#[derive(Eq, Hash, PartialEq, Clone)]
+#[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub enum RedisValueRef {
     String(Bytes),
     Error(Bytes),
