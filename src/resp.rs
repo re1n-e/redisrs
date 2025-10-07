@@ -6,12 +6,13 @@ use tokio_util::codec::{Decoder, Encoder};
 pub type Value = Bytes;
 pub type Key = Bytes;
 
-#[derive(PartialEq, Clone)]
+#[derive(Eq, Hash, PartialEq, Clone)]
 pub enum RedisValueRef {
     String(Bytes),
     Error(Bytes),
     Int(i64),
     Array(Vec<RedisValueRef>),
+    BulkString(Bytes),
     NullArray,
     NullBulkString,
     ErrorMsg(Vec<u8>),
@@ -223,7 +224,16 @@ impl Encoder<RedisValueRef> for RespParser {
                 dst.extend_from_slice(i.to_string().as_bytes());
                 dst.extend_from_slice(b"\r\n");
             }
-            // ... handle other types
+            RedisValueRef::BulkString(s) => {
+                dst.extend_from_slice(b"$");
+                dst.extend_from_slice(s.len().to_string().as_bytes());
+                dst.extend_from_slice(b"\r\n");
+                dst.extend_from_slice(&s);
+                dst.extend_from_slice(b"\r\n");
+            }
+            RedisValueRef::NullBulkString => {
+                dst.extend_from_slice(b"$-1\r\n");
+            }
             _ => {}
         }
         Ok(())
