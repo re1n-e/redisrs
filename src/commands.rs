@@ -41,7 +41,12 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                     RedisValueRef::String(v) => v.clone(),
                     _ => return None,
                 };
-
+                if let Some(_) = arr.get(3) {
+                    println!("Some");
+                }
+                if let Some(_) = arr.get(4) {
+                    println!("2Some");
+                }
                 let expiry = if arr.len() == 5 {
                     if let (RedisValueRef::String(ty), RedisValueRef::Int(time)) =
                         (&arr[3], &arr[4])
@@ -54,8 +59,6 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 } else {
                     None
                 };
-                println!("Expiry");
-                println!("{:?}", expiry);
                 Some(Command::Set { key, value, expiry })
             } else {
                 None
