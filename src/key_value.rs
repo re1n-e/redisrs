@@ -52,7 +52,6 @@ impl KeyValue {
         if let Some(set) = entries.get(key) {
             if let Some(expiry) = set.expiry {
                 if Instant::now() > expiry {
-                    // expired, remove
                     entries.remove(key);
                     return None;
                 }
