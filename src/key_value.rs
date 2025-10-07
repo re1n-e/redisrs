@@ -72,25 +72,17 @@ impl KeyValue {
     }
 
     pub async fn get_entry(&self, key: &Bytes) -> Option<RedisValueRef> {
-        let entries = self.entries.read().await;
-
-        if let Some(set) = entries.get(key) {
-            if let Some(expiry) = set.expiry {
-                if Instant::now() > expiry {
-                    drop(entries);
-                    self.delete_entry(key).await;
+        let mut entries = self.entries.write().await;
+        if let Some(entry) = entries.get_mut(key) {
+            if let Some(expiry) = entry.expiry {
+                if Instant::now() >= expiry {
+                    entries.remove(key); // remove expired
                     return None;
                 }
-            } else {
-                return Some(set.value.clone());
             }
+            return Some(entry.value.clone());
         }
         None
-    }
-
-    pub async fn delete_entry(&self, key: &Bytes) -> bool {
-        let mut entries = self.entries.write().await;
-        entries.remove(key).is_some()
     }
 
     pub async fn exists(&self, key: &Bytes) -> bool {
