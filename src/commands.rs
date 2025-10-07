@@ -54,7 +54,8 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 } else {
                     None
                 };
-
+                println!("Expiry");
+                println!("{:?}", expiry);
                 Some(Command::Set { key, value, expiry })
             } else {
                 None
