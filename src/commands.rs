@@ -13,6 +13,8 @@ enum Command<'a> {
     },
     Get(Bytes),
     RPUSH(Bytes),
+    LPUSH(Bytes),
+    LLEN(Bytes),
     LRANGE {
         key: Bytes,
         start: isize,
@@ -99,7 +101,20 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
-
+        "LPUSH" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
+                Some(Command::LPUSH(k.clone()))
+            } else {
+                None
+            }
+        }
+        "LLEN" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
+                Some(Command::LLEN(k.clone()))
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -133,7 +148,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             for j in 2..arr.len() {
                 match &arr[j] {
                     RedisValueRef::String(s) => {
-                        i = redis.add_list(&key, s.clone()).await;
+                        i = redis.lists.rpush(&key, s.clone()).await;
                     }
                     _ => return None,
                 }
@@ -141,8 +156,23 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             Some(RedisValueRef::Int(i))
         }
 
-        Command::LRANGE { key, start, end } => {
-            Some(RedisValueRef::Array(redis.lrange(&key, start, end).await))
+        Command::LPUSH(key) => {
+            let mut i = 0;
+            for j in 2..arr.len() {
+                match &arr[j] {
+                    RedisValueRef::String(s) => {
+                        i = redis.lists.lpush(&key, s.clone()).await;
+                    }
+                    _ => return None,
+                }
+            }
+            Some(RedisValueRef::Int(i))
         }
+
+        Command::LRANGE { key, start, end } => Some(RedisValueRef::Array(
+            redis.lists.lrange(&key, start, end).await,
+        )),
+
+        Command::LLEN(key) => Some(RedisValueRef::Int(redis.lists.llen(&key).await)),
     }
 }
