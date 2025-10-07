@@ -28,13 +28,12 @@ impl KeyValue {
         expiry: Option<(&[u8], i64)>,
     ) {
         let mut entries = self.entries.write().await;
-
+        
         let set = if let Some((ty, time)) = expiry {
             let duration = match ty {
                 b"EX" => Duration::from_secs(time as u64),
                 b"PX" => Duration::from_millis(time as u64),
                 b"EXAT" => {
-                    // Unix timestamp in seconds
                     let target = Instant::now() + Duration::from_secs(time as u64);
                     entries.insert(
                         key,
@@ -59,9 +58,7 @@ impl KeyValue {
                 }
                 _ => Duration::from_secs(0), // invalid, will expire immediately
             };
-            println!("Duration {:?}", duration);
-            use std::io;
-            io::stdout().flush().unwrap();
+            println!("Duration: {:?}", duration);
             Set {
                 value,
                 expiry: Some(Instant::now() + duration),
