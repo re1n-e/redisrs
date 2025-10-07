@@ -47,9 +47,11 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                     {
                         Some((ty, *time))
                     } else {
+                        println!("NONE 5");
                         None
                     }
                 } else {
+                    println!("NONE NONE");
                     None
                 };
                 Some(Command::Set { key, value, expiry })
