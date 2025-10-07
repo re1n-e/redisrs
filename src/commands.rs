@@ -15,8 +15,8 @@ enum Command<'a> {
     RPUSH(Bytes),
     LRANGE {
         key: Bytes,
-        start: usize,
-        end: usize,
+        start: isize,
+        end: isize,
     },
 }
 
@@ -89,9 +89,9 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                         key: key.clone(),
                         start: std::str::from_utf8(start)
                             .unwrap()
-                            .parse::<usize>()
+                            .parse::<isize>()
                             .unwrap(),
-                        end: std::str::from_utf8(end).unwrap().parse::<usize>().unwrap(),
+                        end: std::str::from_utf8(end).unwrap().parse::<isize>().unwrap(),
                     }),
                     _ => None,
                 }
