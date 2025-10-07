@@ -42,16 +42,11 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                     _ => return None,
                 };
                 let expiry = if arr.len() == 5 {
-                    if let (RedisValueRef::String(ty), RedisValueRef::Int(time)) =
-                        (&arr[3], &arr[4])
-                    {
-                        Some((ty, *time))
-                    } else {
-                        println!("NONE 5");
-                        None
+                    match (&arr[3], &arr[4]) {
+                        (RedisValueRef::String(s), RedisValueRef::Int(i)) => Some((s, *i)),
+                        _ => None,
                     }
                 } else {
-                    println!("NONE NONE");
                     None
                 };
                 Some(Command::Set { key, value, expiry })
