@@ -81,8 +81,9 @@ impl KeyValue {
                     self.delete_entry(key).await;
                     return None;
                 }
+            } else {
+                return Some(set.value.clone());
             }
-            return Some(set.value.clone());
         }
         None
     }
