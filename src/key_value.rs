@@ -49,15 +49,19 @@ impl KeyValue {
 
     pub async fn get_entry(&self, key: &RedisValueRef) -> Option<RedisValueRef> {
         let mut entries = self.entries.write().await;
+
+        // Clone the value so we can safely remove the key later
         if let Some(set) = entries.get(key) {
             if let Some(expiry) = set.expiry {
                 if Instant::now() > expiry {
+                    // Expired: remove it and return None
                     entries.remove(key);
                     return None;
                 }
             }
             return Some(set.value.clone());
         }
+
         None
     }
 }
