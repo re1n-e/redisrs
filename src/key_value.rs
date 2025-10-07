@@ -84,7 +84,6 @@ impl KeyValue {
             }
             return Some(set.value.clone());
         }
-
         None
     }
 
