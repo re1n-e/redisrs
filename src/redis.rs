@@ -17,12 +17,14 @@ impl Redis {
         }
     }
 
-    pub async fn add_list(&self, key: &Bytes, value: RedisValueRef) {
+    pub async fn add_list(&self, key: &Bytes, value: RedisValueRef) -> i64 {
         let mut lists = self.lists.write().await;
         if let Some(list) = lists.get_mut(key) {
             list.push_back(value);
+            list.len() as i64
         } else {
             lists.insert(key.clone(), VecDeque::from(vec![value]));
+            1
         }
     }
 }

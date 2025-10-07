@@ -103,10 +103,11 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         },
 
         Command::RPUSH(key) => {
+            let mut i = 0;
             for j in 2..arr.len() {
-                redis.add_list(&key, arr[j].clone()).await;
+                i = redis.add_list(&key, arr[j].clone()).await;
             }
-            Some(RedisValueRef::Int((arr.len() - 2) as i64))
+            Some(RedisValueRef::Int(i))
         }
     }
 }
