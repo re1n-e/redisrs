@@ -1,6 +1,7 @@
 use crate::resp::RedisValueRef;
 use bytes::Bytes;
 use std::collections::HashMap;
+use std::io::Write;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
@@ -35,18 +36,32 @@ impl KeyValue {
                 b"EXAT" => {
                     // Unix timestamp in seconds
                     let target = Instant::now() + Duration::from_secs(time as u64);
-                    entries.insert(key, Set { value, expiry: Some(target) });
+                    entries.insert(
+                        key,
+                        Set {
+                            value,
+                            expiry: Some(target),
+                        },
+                    );
                     return;
                 }
                 b"PXAT" => {
                     // Unix timestamp in milliseconds
                     let target = Instant::now() + Duration::from_millis(time as u64);
-                    entries.insert(key, Set { value, expiry: Some(target) });
+                    entries.insert(
+                        key,
+                        Set {
+                            value,
+                            expiry: Some(target),
+                        },
+                    );
                     return;
                 }
                 _ => Duration::from_secs(0), // invalid, will expire immediately
             };
             println!("Duration {:?}", duration);
+            use std::io;
+            io::stdout().flush().unwrap();
             Set {
                 value,
                 expiry: Some(Instant::now() + duration),
@@ -69,7 +84,7 @@ impl KeyValue {
                 if Instant::now() > expiry {
                     // Entry has expired
                     drop(entries); // Release read lock
-                    
+
                     // Acquire write lock to remove expired entry
                     let mut entries = self.entries.write().await;
                     entries.remove(key);
@@ -89,7 +104,7 @@ impl KeyValue {
 
     pub async fn exists(&self, key: &Bytes) -> bool {
         let entries = self.entries.read().await;
-        
+
         if let Some(set) = entries.get(key) {
             if let Some(expiry) = set.expiry {
                 if Instant::now() > expiry {
@@ -98,7 +113,7 @@ impl KeyValue {
             }
             return true;
         }
-        
+
         false
     }
 }
