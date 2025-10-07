@@ -234,6 +234,7 @@ impl Encoder<RedisValueRef> for RespParser {
             RedisValueRef::Array(s) => {
                 dst.extend_from_slice(b"*");
                 dst.extend_from_slice(s.len().to_string().as_bytes());
+                dst.extend_from_slice(b"\r\n");
                 for val in s {
                     self.encode(val, dst)?;
                 }
