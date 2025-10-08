@@ -156,9 +156,13 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                         }
                         _ => return None,
                     },
-                    None => 24.0 * 60.0 * 60.0,
+                    None => return None,
                 };
-                let duration = Duration::from_secs_f64(duration_f64);
+                let duration = Duration::from_secs_f64(if duration_f64 == 0.0 {
+                    86400.0
+                } else {
+                    duration_f64
+                });
                 return Some(Command::BLPOP {
                     key: k.clone(),
                     timeout: duration,
