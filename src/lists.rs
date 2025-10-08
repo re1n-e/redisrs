@@ -81,12 +81,10 @@ impl List {
 
         let len = list.len() as isize;
 
-        // Handle empty list
         if len == 0 {
             return Vec::new();
         }
 
-        // Convert negative indices
         let start = if start < 0 {
             (len + start).max(0)
         } else {
@@ -99,12 +97,10 @@ impl List {
             end.min(len - 1)
         };
 
-        // If range is invalid, return empty
         if start > end || end < 0 {
             return Vec::new();
         }
 
-        // Collect items in range
         (start..=end)
             .filter_map(|i| list.get(i as usize))
             .map(|item| RedisValueRef::BulkString(item.clone()))
@@ -129,7 +125,6 @@ impl List {
             }
         }
 
-        // Clean up empty list
         if list.is_empty() {
             lists.remove(key);
         }
@@ -138,7 +133,6 @@ impl List {
     }
 
     pub async fn blpop(&self, key: &Bytes, duration: Duration) -> RedisValueRef {
-        // Try to pop immediately first
         {
             let mut lists = self.lists.write().await;
             if let Some(list) = lists.get_mut(key) {
@@ -155,7 +149,6 @@ impl List {
             }
         }
 
-        // List is empty, register for blocking
         let (tx, rx) = oneshot::channel::<bool>();
 
         {
@@ -169,11 +162,9 @@ impl List {
         // Wait for notification or timeout
         match timeout(duration, rx).await {
             Ok(Ok(_)) => {
-                // We were notified - try to pop
                 let mut lists = self.lists.write().await;
                 if let Some(list) = lists.get_mut(key) {
                     if let Some(value) = list.pop_front() {
-                        // Clean up empty list
                         if list.is_empty() {
                             lists.remove(key);
                         }
@@ -183,7 +174,7 @@ impl List {
                         ]);
                     }
                 }
-                // Notification received but no value (race condition)
+                println!("Ok");
                 RedisValueRef::NullArray
             }
             Ok(Err(_)) | Err(_) => {
