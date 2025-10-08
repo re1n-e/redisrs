@@ -158,6 +158,7 @@ impl List {
                 .entry(key.clone())
                 .or_default()
                 .push_back(tx);
+            println!("Blocked clients len: {}", blocked_clients.len());
         }
 
         match timeout(duration, rx).await {
