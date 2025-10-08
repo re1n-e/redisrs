@@ -2,6 +2,7 @@ use crate::redis::Redis;
 use crate::resp::RedisValueRef;
 use bytes::Bytes;
 use std::sync::Arc;
+use tokio::time::Duration;
 
 enum Command<'a> {
     Ping,
@@ -23,6 +24,10 @@ enum Command<'a> {
     LPOP {
         key: Bytes,
         count: usize,
+    },
+    BLPOP {
+        key: Bytes,
+        timeout: Duration,
     },
 }
 
@@ -142,6 +147,25 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+        "BLPOP" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
+                let duration_f64 = match arr.get(2) {
+                    Some(val) => match val {
+                        RedisValueRef::String(s) => {
+                            std::str::from_utf8(s).unwrap().parse::<f64>().unwrap()
+                        }
+                        _ => return None,
+                    },
+                    None => 24.0 * 60.0 * 60.0,
+                };
+                let duration = Duration::from_secs_f64(duration_f64);
+                return Some(Command::BLPOP {
+                    key: k.clone(),
+                    timeout: duration,
+                });
+            }
+            None
+        }
         _ => None,
     }
 }
@@ -212,5 +236,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             }
             None => Some(RedisValueRef::NullBulkString),
         },
+
+        Command::BLPOP { key, timeout } => Some(redis.lists.blpop(&key, timeout).await),
     }
 }

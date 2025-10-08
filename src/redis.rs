@@ -1,5 +1,5 @@
 use crate::key_value::KeyValue;
-use crate::list::List;
+use crate::lists::List;
 
 pub struct Redis {
     pub kv: KeyValue,
