@@ -20,7 +20,7 @@ impl List {
 
     pub async fn rpush(&self, key: &Bytes, value: Bytes) -> i64 {
         let mut lists = self.lists.write().await;
-        let mut items_added = 0;
+        let mut items_added = 1;
         if let Some(list) = lists.get_mut(key) {
             list.push_back(value);
             items_added = list.len() as i64
