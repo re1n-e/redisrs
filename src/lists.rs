@@ -53,6 +53,7 @@ impl List {
         let mut blocked_clients = self.blocked.write().await;
         if let Some(notifiers) = blocked_clients.get_mut(key) {
             if let Some(notifier) = notifiers.pop_front() {
+                println!("Wake up client");
                 let _ = notifier.send(true);
                 if notifiers.is_empty() {
                     blocked_clients.remove(key);
@@ -159,7 +160,6 @@ impl List {
                 .push_back(tx);
         }
 
-        // Wait for notification or timeout
         match timeout(duration, rx).await {
             Ok(Ok(_)) => {
                 let mut lists = self.lists.write().await;
@@ -178,7 +178,6 @@ impl List {
                 RedisValueRef::NullArray
             }
             Ok(Err(_)) | Err(_) => {
-                // Timeout or channel closed - clean up if needed
                 println!("Not good");
                 let mut blocked_clients = self.blocked.write().await;
                 if let Some(notifiers) = blocked_clients.get_mut(key) {
