@@ -1,8 +1,5 @@
 use crate::key_value::KeyValue;
 use crate::list::List;
-use bytes::Bytes;
-use std::collections::{HashMap, VecDeque};
-use tokio::sync::RwLock;
 
 pub struct Redis {
     pub kv: KeyValue,

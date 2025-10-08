@@ -80,4 +80,26 @@ impl List {
         }
         res
     }
+
+    pub async fn lpop(&self, key: &Bytes, count: usize) -> Option<Vec<RedisValueRef>> {
+        let mut res: Vec<RedisValueRef> = Vec::new();
+        let mut lists = self.lists.write().await;
+        if let Some(list) = lists.get_mut(key) {
+            if !list.is_empty() {
+                for _ in 0..count {
+                    let element = list.pop_front();
+                    if element.is_none() {
+                        break;
+                    }
+                    res.push(RedisValueRef::BulkString(element.unwrap()));
+                }
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+
+        Some(res)
+    }
 }

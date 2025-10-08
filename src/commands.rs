@@ -20,6 +20,10 @@ enum Command<'a> {
         start: isize,
         end: isize,
     },
+    LPOP {
+        key: Bytes,
+        count: usize,
+    },
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -115,6 +119,29 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+        "LPOP" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
+                if arr.len() == 3 {
+                    match &arr[2] {
+                        RedisValueRef::String(count) => Some(Command::LPOP {
+                            key: k.clone(),
+                            count: std::str::from_utf8(count)
+                                .unwrap()
+                                .parse::<usize>()
+                                .unwrap(),
+                        }),
+                        _ => None,
+                    }
+                } else {
+                    Some(Command::LPOP {
+                        key: k.clone(),
+                        count: 1,
+                    })
+                }
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -174,5 +201,16 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         )),
 
         Command::LLEN(key) => Some(RedisValueRef::Int(redis.lists.llen(&key).await)),
+
+        Command::LPOP { key, count } => match redis.lists.lpop(&key, count).await {
+            Some(v) => {
+                if v.len() == 1 {
+                    return Some(v[0].clone());
+                } else {
+                    return Some(RedisValueRef::Array(v));
+                }
+            }
+            None => Some(RedisValueRef::NullBulkString),
+        },
     }
 }
