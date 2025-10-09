@@ -48,4 +48,9 @@ impl Stream {
         }
         stream_id
     }
+
+    pub async fn contains(&self, stream_key: &Bytes) -> bool {
+        let streams = self.streams.read().await;
+        streams.contains_key(stream_key)
+    }
 }

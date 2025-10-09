@@ -193,10 +193,7 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                         _ => None,
                     }
                 } else {
-                    Some(Command::LPOP {
-                        key: k.clone(),
-                        count: 1,
-                    })
+                    None
                 }
             } else {
                 None
@@ -277,7 +274,10 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         Command::TYPE(key) => {
             if redis.kv.contains(&key).await {
                 Some(RedisValueRef::String(Bytes::from("string")))
-            } else {
+            } else if redis.stream.contains(&key).await {
+                Some(RedisValueRef::String(Bytes::from("stream")))
+            } 
+            else {
                 Some(RedisValueRef::String(Bytes::from("none")))
             }
         }
