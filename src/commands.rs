@@ -276,8 +276,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                 Some(RedisValueRef::String(Bytes::from("string")))
             } else if redis.stream.contains(&key).await {
                 Some(RedisValueRef::String(Bytes::from("stream")))
-            } 
-            else {
+            } else {
                 Some(RedisValueRef::String(Bytes::from("none")))
             }
         }
@@ -289,9 +288,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                     _ => return None,
                 }
             }
-            Some(RedisValueRef::BulkString(
-                redis.stream.xadd(key, id, kv).await,
-            ))
+            Some(redis.stream.xadd(key, id, kv).await)
         }
     }
 }
