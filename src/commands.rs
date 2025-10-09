@@ -29,6 +29,7 @@ enum Command<'a> {
         key: Bytes,
         timeout: Duration,
     },
+    TYPE(Bytes),
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -170,6 +171,13 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
             None
         }
+        "TYPE" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
+                Some(Command::TYPE(k.clone()))
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -242,5 +250,12 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         },
 
         Command::BLPOP { key, timeout } => Some(redis.lists.blpop(&key, timeout).await),
+        Command::TYPE(key) => {
+            if redis.kv.contains(&key).await {
+                Some(RedisValueRef::String(Bytes::from("string")))
+            } else {
+                Some(RedisValueRef::String(Bytes::from("none")))
+            }
+        }
     }
 }

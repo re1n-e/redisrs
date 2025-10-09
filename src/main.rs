@@ -4,7 +4,7 @@ use redis::redis::Redis;
 use redis::resp::RespParser;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio_util::codec::{Encoder, Framed};
+use tokio_util::codec::Framed;
 
 #[tokio::main]
 async fn main() {

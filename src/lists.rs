@@ -182,7 +182,6 @@ impl List {
                 println!("Not good");
                 let mut blocked_clients = self.blocked.write().await;
                 if let Some(notifiers) = blocked_clients.get_mut(key) {
-                    // Remove empty queues
                     if notifiers.is_empty() {
                         blocked_clients.remove(key);
                     }
@@ -190,5 +189,10 @@ impl List {
                 RedisValueRef::NullArray
             }
         }
+    }
+
+    pub async fn contains(&self, key: &Bytes) -> bool {
+        let lists = self.lists.read().await;
+        lists.contains_key(key)
     }
 }

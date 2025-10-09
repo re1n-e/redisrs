@@ -102,6 +102,11 @@ impl KeyValue {
 
         false
     }
+
+    pub async fn contains(&self, key: &Bytes) -> bool {
+        let entries = self.entries.read().await;
+        entries.contains_key(key)
+    }
 }
 
 impl Default for KeyValue {
