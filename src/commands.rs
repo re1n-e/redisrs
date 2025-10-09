@@ -30,6 +30,10 @@ enum Command<'a> {
         timeout: Duration,
     },
     TYPE(Bytes),
+    XADD {
+        key: Bytes,
+        id: Bytes,
+    },
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -178,6 +182,26 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+        "XADD" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
+                if arr.len() >= 3 {
+                    match &arr[2] {
+                        RedisValueRef::String(id) => Some(Command::XADD {
+                            key: k.clone(),
+                            id: id.clone(),
+                        }),
+                        _ => None,
+                    }
+                } else {
+                    Some(Command::LPOP {
+                        key: k.clone(),
+                        count: 1,
+                    })
+                }
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -256,6 +280,18 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             } else {
                 Some(RedisValueRef::String(Bytes::from("none")))
             }
+        }
+        Command::XADD { key, id } => {
+            let mut kv: Vec<Bytes> = Vec::new();
+            for i in 3..arr.len() {
+                match &arr[i] {
+                    RedisValueRef::String(b) => kv.push(b.clone()),
+                    _ => return None,
+                }
+            }
+            Some(RedisValueRef::BulkString(
+                redis.stream.xadd(key, id, kv).await,
+            ))
         }
     }
 }
