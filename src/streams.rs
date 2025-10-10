@@ -402,11 +402,11 @@ impl Stream {
         res
     }
 
-    pub async fn blocking_xread(&self, kv: &Vec<Bytes>, duration: Duration) -> Vec<RedisValueRef> {
+    pub async fn blocking_xread(&self, kv: &Vec<Bytes>, duration: Duration) -> RedisValueRef {
         // First check if there's already data
-        let mut res = self.xread(kv).await;
+        let res = self.xread(kv).await;
         if !res.is_empty() {
-            return res;
+            return RedisValueRef::Array(res);
         }
 
         // No data yet, block and wait
@@ -425,16 +425,18 @@ impl Stream {
         // Wait for notification or timeout
         match timeout(duration, rx).await {
             Ok(Ok(_)) => {
-                // Got notification, read the data
-                res = self.xread(kv).await;
+                let res = self.xread(kv).await;
+                if res.is_empty() {
+                    RedisValueRef::NullArray
+                } else {
+                    RedisValueRef::Array(res)
+                }
             }
             Ok(Err(_)) | Err(_) => {
-                // Timeout or sender dropped - nothing to do
-                // The sender is already consumed or will be dropped
+                // Timeout - return null array
+                RedisValueRef::NullArray
             }
         }
-
-        res
     }
 }
 

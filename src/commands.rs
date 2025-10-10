@@ -359,12 +359,12 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                 } else {
                     duration_f64
                 });
-                Some(RedisValueRef::Array(
+                Some(
                     redis
                         .stream
                         .blocking_xread(&key_stream_start, duration)
                         .await,
-                ))
+                )
             } else {
                 Some(RedisValueRef::Array(
                     redis.stream.xread(&key_stream_start).await,
