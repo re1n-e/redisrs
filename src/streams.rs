@@ -414,6 +414,7 @@ impl Stream {
 
         // Register for the first (and only) stream key
         {
+            println!("blocking created");
             let mut blocked_clients = self.blocked.write().await;
             let stream_key = &kv[0];
             blocked_clients

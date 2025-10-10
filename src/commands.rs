@@ -359,6 +359,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                 } else {
                     duration_f64
                 });
+                println!("Blocking read");
                 Some(
                     redis
                         .stream
