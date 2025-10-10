@@ -331,6 +331,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                 b"BLOCK" => 4,
                 _ => 2,
             };
+            println!("Start: {start}");
             let n = (arr.len() - start) / 2;
             for i in start..(start + n) {
                 match (&arr[i], &arr[n + i]) {
