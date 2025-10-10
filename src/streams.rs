@@ -1,8 +1,11 @@
 use crate::resp::RedisValueRef;
 use bytes::Bytes;
 use memchr::memchr;
-use std::collections::{BTreeMap, HashMap};
-use tokio::sync::RwLock;
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use tokio::sync::{oneshot, RwLock};
+use tokio::time::{timeout, Duration};
+type BlockedClientsMap = HashMap<Bytes, VecDeque<oneshot::Sender<bool>>>;
+
 pub struct StreamKV {
     // (sequence num - time) -> map (key , value)
     map: BTreeMap<(Bytes, Bytes), BTreeMap<Bytes, Bytes>>,
@@ -19,16 +22,21 @@ impl StreamKV {
 pub struct Stream {
     // streamid -> StreamKV
     streams: RwLock<HashMap<Bytes, StreamKV>>,
+    blocked: RwLock<BlockedClientsMap>,
 }
 
 impl Stream {
     pub fn new() -> Self {
         Stream {
             streams: RwLock::new(HashMap::new()),
+            blocked: RwLock::new(HashMap::new()),
         }
     }
 
     pub async fn xadd(&self, stream_key: Bytes, stream_id: Bytes, kv: Vec<Bytes>) -> RedisValueRef {
+        let mut res = RedisValueRef::Error(Bytes::from(
+            "ERR Invalid stream ID specified as stream command argument",
+        ));
         if let Some(pos) = memchr(b'-', &stream_id) {
             let ts = Bytes::copy_from_slice(&stream_id[..pos]);
             let seq = Bytes::copy_from_slice(&stream_id[pos + 1..]);
@@ -70,7 +78,7 @@ impl Stream {
                 std::str::from_utf8(&final_ts).unwrap(),
                 std::str::from_utf8(&final_seq).unwrap()
             );
-            RedisValueRef::BulkString(Bytes::from(result_id))
+            res = RedisValueRef::BulkString(Bytes::from(result_id));
         } else {
             // Handle special case: just "*" without a dash
             if stream_id.as_ref() == b"*" {
@@ -95,13 +103,22 @@ impl Stream {
                     std::str::from_utf8(&final_ts).unwrap(),
                     std::str::from_utf8(&final_seq).unwrap()
                 );
-                return RedisValueRef::BulkString(Bytes::from(result_id));
+                res = RedisValueRef::BulkString(Bytes::from(result_id));
             }
-
-            RedisValueRef::Error(Bytes::from(
-                "ERR Invalid stream ID specified as stream command argument",
-            ))
         }
+
+        let mut blocked_clients = self.blocked.write().await;
+        if let Some(notifiers) = blocked_clients.get_mut(&stream_key) {
+            if let Some(notifier) = notifiers.pop_front() {
+                println!("Wake up client");
+                let _ = notifier.send(true);
+                if notifiers.is_empty() {
+                    blocked_clients.remove(&stream_key);
+                }
+            }
+        }
+
+        res
     }
 
     pub async fn contains(&self, stream_key: &Bytes) -> bool {
@@ -325,7 +342,7 @@ impl Stream {
         }
     }
 
-    pub async fn xread(&self, kv: Vec<Bytes>) -> Vec<RedisValueRef> {
+    pub async fn xread(&self, kv: &Vec<Bytes>) -> Vec<RedisValueRef> {
         let mut res: Vec<RedisValueRef> = Vec::new();
         let streams = self.streams.read().await;
 
@@ -382,6 +399,36 @@ impl Stream {
             }
         }
 
+        res
+    }
+
+    pub async fn blocking_xread(&self, kv: &Vec<Bytes>, duration: Duration) -> Vec<RedisValueRef> {
+        let mut res = self.xread(kv).await;
+        if res.len() > 0 {
+            return res;
+        }
+
+        let (tx, rx) = oneshot::channel::<bool>();
+
+        {
+            let mut blocked_clients = self.blocked.write().await;
+            blocked_clients
+                .entry(kv[0].clone())
+                .or_default()
+                .push_back(tx);
+        }
+
+        match timeout(duration, rx).await {
+            Ok(Ok(_)) => res = self.xread(kv).await,
+            Ok(Err(_)) | Err(_) => {
+                let mut blocked_clients = self.blocked.write().await;
+                if let Some(notifiers) = blocked_clients.get_mut(&kv[0]) {
+                    if notifiers.is_empty() {
+                        blocked_clients.remove(&kv[0]);
+                    }
+                }
+            }
+        }
         res
     }
 }

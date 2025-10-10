@@ -39,7 +39,7 @@ enum Command<'a> {
         start: Bytes,
         end: Bytes,
     },
-    XREAD,
+    XREAD(Bytes),
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -224,7 +224,13 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
             None
         }
-        "XREAD" => Some(Command::XREAD),
+        "XREAD" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(2) {
+                Some(Command::XREAD(k.clone()))
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -319,10 +325,14 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         Command::XRANGE { key, start, end } => Some(RedisValueRef::Array(
             redis.stream.xrange(&key, &start, &end).await,
         )),
-        Command::XREAD => {
+        Command::XREAD(to_block) => {
             let mut key_stream_start: Vec<Bytes> = Vec::new();
-            let n = (arr.len() - 2) / 2;
-            for i in 2..(2 + n) {
+            let start = match to_block.as_ref() {
+                b"BLOCK" => 4,
+                _ => 2,
+            };
+            let n = (arr.len() - start) / 2;
+            for i in start..(start + n) {
                 match (&arr[i], &arr[n + i]) {
                     (RedisValueRef::String(stream_key), RedisValueRef::String(stream_start)) => {
                         key_stream_start.push(stream_key.clone());
@@ -331,11 +341,32 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                     _ => return None,
                 }
             }
-            println!("Key_stream_len {}", key_stream_start.len());
-            println!("{:?}", key_stream_start);
-            Some(RedisValueRef::Array(
-                redis.stream.xread(key_stream_start).await,
-            ))
+            if start == 4 {
+                let duration_f64 = match arr.get(2) {
+                    Some(val) => match val {
+                        RedisValueRef::String(s) => {
+                            std::str::from_utf8(s).unwrap().parse::<f64>().unwrap()
+                        }
+                        _ => return None,
+                    },
+                    None => return None,
+                };
+                let duration = Duration::from_secs_f64(if duration_f64 == 0.0 {
+                    86400.0
+                } else {
+                    duration_f64
+                });
+                Some(RedisValueRef::Array(
+                    redis
+                        .stream
+                        .blocking_xread(&key_stream_start, duration)
+                        .await,
+                ))
+            } else {
+                Some(RedisValueRef::Array(
+                    redis.stream.xread(&key_stream_start).await,
+                ))
+            }
         }
     }
 }

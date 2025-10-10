@@ -175,11 +175,9 @@ impl List {
                         ]);
                     }
                 }
-                println!("Ok");
                 RedisValueRef::NullArray
             }
             Ok(Err(_)) | Err(_) => {
-                println!("Not good");
                 let mut blocked_clients = self.blocked.write().await;
                 if let Some(notifiers) = blocked_clients.get_mut(key) {
                     if notifiers.is_empty() {
