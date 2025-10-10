@@ -332,6 +332,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                 }
             }
             println!("Key_stream_len {}", key_stream_start.len());
+            println!("{:?}", key_stream_start);
             Some(RedisValueRef::Array(
                 redis.stream.xread(key_stream_start).await,
             ))
