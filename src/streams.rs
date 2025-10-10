@@ -158,59 +158,90 @@ impl Stream {
         end: &Bytes,
     ) -> Vec<RedisValueRef> {
         let mut res: Vec<RedisValueRef> = Vec::new();
-        let (start_ts, start_seq) = if let Some(pos) = memchr(b'-', start) {
+
+        // Handle special cases for start
+        let (start_ts, start_seq) = if start.as_ref() == b"-" {
+            // "-" means start from the beginning
+            (Bytes::from("0"), Bytes::from("0"))
+        } else if let Some(pos) = memchr(b'-', start) {
             let ts = Bytes::copy_from_slice(&start[..pos]);
             let seq = Bytes::copy_from_slice(&start[pos + 1..]);
             (ts, seq)
         } else {
-            (Bytes::from((0).to_string()), Bytes::from((1).to_string()))
+            // Invalid format
+            return res;
         };
 
-        let (end_ts, end_seq) = if let Some(pos) = memchr(b'-', end) {
+        // Handle special cases for end
+        let (end_ts, end_seq) = if end.as_ref() == b"+" {
+            // "+" means go to the end (use max values)
+            (
+                Bytes::from(u64::MAX.to_string()),
+                Bytes::from(u64::MAX.to_string()),
+            )
+        } else if let Some(pos) = memchr(b'-', end) {
             let ts = Bytes::copy_from_slice(&end[..pos]);
             let seq = Bytes::copy_from_slice(&end[pos + 1..]);
             (ts, seq)
         } else {
-            (
-                Bytes::from((current_unix_timestamp_ms()).to_string()),
-                Bytes::from((current_unix_timestamp_ms()).to_string()),
-            )
+            // Invalid format
+            return res;
         };
 
         let streams = self.streams.read().await;
         if let Some(stream) = streams.get(stream_id) {
             for ((ts, seq), map) in stream.map.iter() {
-                if (*ts == start_ts && *seq <= start_seq) || (*ts == end_ts && *seq >= end_seq) {
-                    let result_id = format!(
-                        "{}-{}",
-                        std::str::from_utf8(ts).unwrap(),
-                        std::str::from_utf8(seq).unwrap()
-                    );
+                // Parse current entry's timestamp and sequence
+                let ts_str = std::str::from_utf8(ts).ok().unwrap();
+                let seq_str = std::str::from_utf8(seq).ok().unwrap();
+                let ts_num = ts_str.parse::<u64>().ok().unwrap();
+                let seq_num = seq_str.parse::<u64>().ok().unwrap();
+
+                // Parse start and end bounds
+                let start_ts_num = std::str::from_utf8(&start_ts)
+                    .ok()
+                    .unwrap()
+                    .parse::<u64>()
+                    .ok()
+                    .unwrap();
+                let start_seq_num = std::str::from_utf8(&start_seq)
+                    .ok()
+                    .unwrap()
+                    .parse::<u64>()
+                    .ok()
+                    .unwrap();
+                let end_ts_num = std::str::from_utf8(&end_ts)
+                    .ok()
+                    .unwrap()
+                    .parse::<u64>()
+                    .ok()
+                    .unwrap();
+                let end_seq_num = std::str::from_utf8(&end_seq)
+                    .ok()
+                    .unwrap()
+                    .parse::<u64>()
+                    .ok()
+                    .unwrap();
+
+                let after_start =
+                    ts_num > start_ts_num || (ts_num == start_ts_num && seq_num >= start_seq_num);
+                let before_end =
+                    ts_num < end_ts_num || (ts_num == end_ts_num && seq_num <= end_seq_num);
+
+                if after_start && before_end {
+                    let result_id = format!("{}-{}", ts_str, seq_str);
                     let mut map_vec: Vec<RedisValueRef> = Vec::new();
                     map_vec.push(RedisValueRef::BulkString(Bytes::from(result_id)));
+
+                    let mut kv_array: Vec<RedisValueRef> = Vec::new();
                     for (key, val) in map.iter() {
-                        map_vec.push(RedisValueRef::Array(vec![
-                            RedisValueRef::String(key.clone()),
-                            RedisValueRef::String(val.clone()),
-                        ]));
+                        kv_array.push(RedisValueRef::BulkString(key.clone()));
+                        kv_array.push(RedisValueRef::BulkString(val.clone()));
                     }
+                    map_vec.push(RedisValueRef::Array(kv_array));
+
                     res.push(RedisValueRef::Array(map_vec));
-                } else if *ts > start_ts && *ts < end_ts {
-                    let result_id = format!(
-                        "{}-{}",
-                        std::str::from_utf8(ts).unwrap(),
-                        std::str::from_utf8(seq).unwrap()
-                    );
-                    let mut map_vec: Vec<RedisValueRef> = Vec::new();
-                    map_vec.push(RedisValueRef::BulkString(Bytes::from(result_id)));
-                    for (key, val) in map.iter() {
-                        map_vec.push(RedisValueRef::Array(vec![
-                            RedisValueRef::String(key.clone()),
-                            RedisValueRef::String(val.clone()),
-                        ]));
-                    }
-                    res.push(RedisValueRef::Array(map_vec));
-                } else {
+                } else if ts_num > end_ts_num || (ts_num == end_ts_num && seq_num > end_seq_num) {
                     break;
                 }
             }
