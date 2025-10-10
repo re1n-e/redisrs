@@ -158,20 +158,29 @@ impl Stream {
         end: &Bytes,
     ) -> Vec<RedisValueRef> {
         let mut res: Vec<RedisValueRef> = Vec::new();
-        let start_ts = match start.as_ref() {
-            b"+" => &Bytes::from((0).to_string()),
-            _ => start,
+        let (start_ts, start_seq) = if let Some(pos) = memchr(b'-', start) {
+            let ts = Bytes::copy_from_slice(&stream_id[..pos]);
+            let seq = Bytes::copy_from_slice(&stream_id[pos + 1..]);
+            (ts, seq)
+        } else {
+            (Bytes::from((0).to_string()), Bytes::from((1).to_string()))
         };
 
-        let end_ts = match end.as_ref() {
-            b"-" => &Bytes::from(current_unix_timestamp_ms().to_string()),
-            _ => end,
+        let (end_ts, end_seq) = if let Some(pos) = memchr(b'-', end) {
+            let ts = Bytes::copy_from_slice(&stream_id[..pos]);
+            let seq = Bytes::copy_from_slice(&stream_id[pos + 1..]);
+            (ts, seq)
+        } else {
+            (
+                Bytes::from((current_unix_timestamp_ms()).to_string()),
+                Bytes::from((current_unix_timestamp_ms()).to_string()),
+            )
         };
 
         let streams = self.streams.read().await;
         if let Some(stream) = streams.get(stream_id) {
             for ((ts, seq), map) in stream.map.iter() {
-                if ts >= start_ts && ts <= end_ts {
+                if (*ts == start_ts && *seq <= start_seq) || (*ts == end_ts && *seq >= end_seq) {
                     let result_id = format!(
                         "{}-{}",
                         std::str::from_utf8(ts).unwrap(),
@@ -186,7 +195,22 @@ impl Stream {
                         ]));
                     }
                     res.push(RedisValueRef::Array(map_vec));
-                } else if ts > end_ts {
+                } else if *ts > start_ts && *ts < end_ts {
+                    let result_id = format!(
+                        "{}-{}",
+                        std::str::from_utf8(ts).unwrap(),
+                        std::str::from_utf8(seq).unwrap()
+                    );
+                    let mut map_vec: Vec<RedisValueRef> = Vec::new();
+                    map_vec.push(RedisValueRef::BulkString(Bytes::from(result_id)));
+                    for (key, val) in map.iter() {
+                        map_vec.push(RedisValueRef::Array(vec![
+                            RedisValueRef::String(key.clone()),
+                            RedisValueRef::String(val.clone()),
+                        ]));
+                    }
+                    res.push(RedisValueRef::Array(map_vec));
+                } else {
                     break;
                 }
             }

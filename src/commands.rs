@@ -205,7 +205,7 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
         }
         "XRANGE" => {
-            if arr.len() >= 4 {
+            if arr.len() == 4 {
                 match (&arr[1], &arr[2], &arr[3]) {
                     (
                         RedisValueRef::String(key),
