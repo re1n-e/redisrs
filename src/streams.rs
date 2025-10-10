@@ -403,11 +403,19 @@ impl Stream {
     }
 
     pub async fn blocking_xread(&self, kv: &Vec<Bytes>, duration: Duration) -> RedisValueRef {
-        let (tx, rx) = oneshot::channel::<bool>();
-        let stream_key = kv[0].clone();
+        // First check if there's already data
+        let res = self.xread(kv).await;
+        if !res.is_empty() {
+            return RedisValueRef::Array(res);
+        }
 
-        // Register BEFORE checking (prevents race condition)
+        // No data yet, block and wait
+        let (tx, rx) = oneshot::channel::<bool>();
+
+        // Register for the first stream key
+        let stream_key = kv[0].clone();
         {
+            println!("blocking created");
             let mut blocked_clients = self.blocked.write().await;
             blocked_clients
                 .entry(stream_key.clone())
@@ -415,38 +423,33 @@ impl Stream {
                 .push_back(tx);
         }
 
-        // Now check if data exists
-        let res = self.xread(kv).await;
-        if !res.is_empty() {
-            // Data exists, remove ourselves from blocked list
-            let mut blocked_clients = self.blocked.write().await;
-            if let Some(queue) = blocked_clients.get_mut(&stream_key) {
-                // Remove the last added (ourselves)
-                queue.pop_back();
-                if queue.is_empty() {
-                    blocked_clients.remove(&stream_key);
-                }
-            }
-            return RedisValueRef::Array(res);
-        }
-
         // Wait for notification or timeout
         match timeout(duration, rx).await {
             Ok(Ok(_)) => {
+                // Got notified - check for new data
                 let res = self.xread(kv).await;
                 if res.is_empty() {
+                    println!("None");
                     RedisValueRef::NullArray
                 } else {
+                    println!("Not none");
                     RedisValueRef::Array(res)
                 }
             }
-            Ok(Err(_)) | Err(_) => {
-                // Timeout or sender dropped - cleanup
+            Ok(Err(_)) => {
+                // Sender was dropped (shouldn't happen normally)
+                println!("Sender dropped");
+                RedisValueRef::NullArray
+            }
+            Err(_) => {
+                // Timeout occurred - need to clean up
+                println!("Timeout - cleaning up blocked client");
                 let mut blocked_clients = self.blocked.write().await;
-                if let Some(queue) = blocked_clients.get_mut(&stream_key) {
-                    // Remove stale senders
-                    queue.retain(|_| false); // Simple cleanup
-                    if queue.is_empty() {
+                if let Some(notifiers) = blocked_clients.get_mut(&stream_key) {
+                    // Remove all closed/dropped senders
+                    // Since our sender was dropped by timeout, this cleans it up
+                    notifiers.retain(|sender| !sender.is_closed());
+                    if notifiers.is_empty() {
                         blocked_clients.remove(&stream_key);
                     }
                 }
