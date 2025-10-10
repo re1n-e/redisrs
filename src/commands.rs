@@ -341,6 +341,8 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                     _ => return None,
                 }
             }
+            println!("key_stream_start: {}", key_stream_start.len());
+            println!("{:?}", key_stream_start);
             if start == 4 {
                 let duration_f64 = match arr.get(2) {
                     Some(val) => match val {
