@@ -34,6 +34,11 @@ enum Command<'a> {
         key: Bytes,
         id: Bytes,
     },
+    XRANGE {
+        key: Bytes,
+        start: Bytes,
+        end: Bytes,
+    },
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -199,6 +204,25 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+        "XRANGE" => {
+            if arr.len() >= 4 {
+                match (&arr[1], &arr[2], &arr[3]) {
+                    (
+                        RedisValueRef::String(key),
+                        RedisValueRef::String(start),
+                        RedisValueRef::String(end),
+                    ) => {
+                        return Some(Command::XRANGE {
+                            key: key.clone(),
+                            start: start.clone(),
+                            end: end.clone(),
+                        })
+                    }
+                    _ => return None,
+                }
+            }
+            None
+        }
         _ => None,
     }
 }
@@ -290,5 +314,8 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             }
             Some(redis.stream.xadd(key, id, kv).await)
         }
+        Command::XRANGE { key, start, end } => Some(RedisValueRef::Array(
+            redis.stream.xrange(&key, &start, &end).await,
+        )),
     }
 }

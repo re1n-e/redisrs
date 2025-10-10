@@ -51,7 +51,6 @@ impl Stream {
                 }
             };
 
-            // Insert the entry
             let mut streams = self.streams.write().await;
             streams.entry(stream_key.clone()).or_insert(StreamKV::new());
             if let Some(stream) = streams.get_mut(&stream_key) {
@@ -66,7 +65,6 @@ impl Stream {
                 }
             }
 
-            // Return the generated ID
             let result_id = format!(
                 "{}-{}",
                 std::str::from_utf8(&final_ts).unwrap(),
@@ -151,6 +149,49 @@ impl Stream {
         }
 
         None
+    }
+
+    pub async fn xrange(
+        &self,
+        stream_id: &Bytes,
+        start: &Bytes,
+        end: &Bytes,
+    ) -> Vec<RedisValueRef> {
+        let mut res: Vec<RedisValueRef> = Vec::new();
+        let start_ts = match start.as_ref() {
+            b"+" => &Bytes::from((0).to_string()),
+            _ => start,
+        };
+
+        let end_ts = match end.as_ref() {
+            b"-" => &Bytes::from(current_unix_timestamp_ms().to_string()),
+            _ => end,
+        };
+
+        let streams = self.streams.read().await;
+        if let Some(stream) = streams.get(stream_id) {
+            for ((ts, seq), map) in stream.map.iter() {
+                if ts >= start_ts && ts <= end_ts {
+                    let result_id = format!(
+                        "{}-{}",
+                        std::str::from_utf8(ts).unwrap(),
+                        std::str::from_utf8(seq).unwrap()
+                    );
+                    let mut map_vec: Vec<RedisValueRef> = Vec::new();
+                    map_vec.push(RedisValueRef::BulkString(Bytes::from(result_id)));
+                    for (key, val) in map.iter() {
+                        map_vec.push(RedisValueRef::Array(vec![
+                            RedisValueRef::String(key.clone()),
+                            RedisValueRef::String(val.clone()),
+                        ]));
+                    }
+                    res.push(RedisValueRef::Array(map_vec));
+                } else if ts > end_ts {
+                    break;
+                }
+            }
+        }
+        res
     }
 
     async fn generate_id(&self, stream_key: &Bytes, cur_ts: Option<&Bytes>) -> (Bytes, Bytes) {
