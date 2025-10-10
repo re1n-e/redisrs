@@ -321,9 +321,8 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         )),
         Command::XREAD => {
             let mut key_stream_start: Vec<Bytes> = Vec::new();
-            let n = (arr.len() - 2) / 2;
-            for i in 2..=n {
-                match (&arr[i], &arr[i + n]) {
+            for i in (2..arr.len()).step_by(2) {
+                match (&arr[i], &arr[i + 1]) {
                     (RedisValueRef::String(stream_key), RedisValueRef::String(stream_start)) => {
                         key_stream_start.push(stream_key.clone());
                         key_stream_start.push(stream_start.clone());
