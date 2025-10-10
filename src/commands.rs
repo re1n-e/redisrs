@@ -331,7 +331,9 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                     _ => return None,
                 }
             }
-            None
+            Some(RedisValueRef::Array(
+                redis.stream.xread(key_stream_start).await,
+            ))
         }
     }
 }
