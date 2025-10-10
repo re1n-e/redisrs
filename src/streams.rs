@@ -159,7 +159,6 @@ impl Stream {
     ) -> Vec<RedisValueRef> {
         let mut res: Vec<RedisValueRef> = Vec::new();
 
-        // Handle special cases for start
         let (start_ts, start_seq) = if start.as_ref() == b"-" {
             // "-" means start from the beginning
             (Bytes::from("0"), Bytes::from("0"))
@@ -172,7 +171,6 @@ impl Stream {
             return res;
         };
 
-        // Handle special cases for end
         let (end_ts, end_seq) = if end.as_ref() == b"+" {
             // "+" means go to the end (use max values)
             (
@@ -325,6 +323,66 @@ impl Stream {
                 }
             }
         }
+    }
+
+    pub async fn xread(&self, kv: Vec<Bytes>) -> Vec<RedisValueRef> {
+        let mut res: Vec<RedisValueRef> = Vec::new();
+        let streams = self.streams.read().await;
+
+        // Process each stream key-id pair
+        for i in (0..kv.len()).step_by(2) {
+            let stream_key = &kv[i];
+            let stream_id = &kv[i + 1];
+
+            let mut stream_entries: Vec<RedisValueRef> = Vec::new();
+
+            if let Some(pos) = memchr(b'-', stream_id) {
+                let cur_ts = Bytes::copy_from_slice(&stream_id[..pos]);
+                let cur_seq = Bytes::copy_from_slice(&stream_id[pos + 1..]);
+
+                let cur_ts_str = std::str::from_utf8(&cur_ts).ok().unwrap();
+                let cur_seq_str = std::str::from_utf8(&cur_seq).ok().unwrap();
+
+                let cur_ts_int = cur_ts_str.parse::<u64>().unwrap();
+                let cur_seq_int = cur_seq_str.parse::<u64>().unwrap();
+
+                if let Some(stream) = streams.get(stream_key) {
+                    for ((ts, seq), map) in stream.map.iter() {
+                        let ts_str = std::str::from_utf8(ts).ok().unwrap();
+                        let seq_str = std::str::from_utf8(seq).ok().unwrap();
+
+                        let ts_int = ts_str.parse::<u64>().unwrap();
+                        let seq_int = seq_str.parse::<u64>().unwrap();
+
+                        // Check if this entry is AFTER the provided ID (exclusive)
+                        if ts_int > cur_ts_int || (ts_int == cur_ts_int && seq_int > cur_seq_int) {
+                            let result_id = format!("{}-{}", ts_str, seq_str);
+                            let mut entry_array: Vec<RedisValueRef> = Vec::new();
+                            entry_array.push(RedisValueRef::BulkString(Bytes::from(result_id)));
+
+                            let mut kv_array: Vec<RedisValueRef> = Vec::new();
+                            for (key, val) in map.iter() {
+                                kv_array.push(RedisValueRef::BulkString(key.clone()));
+                                kv_array.push(RedisValueRef::BulkString(val.clone()));
+                            }
+                            entry_array.push(RedisValueRef::Array(kv_array));
+
+                            stream_entries.push(RedisValueRef::Array(entry_array));
+                        }
+                    }
+                }
+            }
+
+            // Only add this stream to results if it has entries
+            if !stream_entries.is_empty() {
+                res.push(RedisValueRef::Array(vec![
+                    RedisValueRef::BulkString(stream_key.clone()),
+                    RedisValueRef::Array(stream_entries),
+                ]));
+            }
+        }
+
+        res
     }
 }
 

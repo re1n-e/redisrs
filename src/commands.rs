@@ -39,6 +39,7 @@ enum Command<'a> {
         start: Bytes,
         end: Bytes,
     },
+    XREAD,
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -223,6 +224,7 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
             None
         }
+        "XREAD" => Some(Command::XREAD),
         _ => None,
     }
 }
@@ -317,5 +319,19 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         Command::XRANGE { key, start, end } => Some(RedisValueRef::Array(
             redis.stream.xrange(&key, &start, &end).await,
         )),
+        Command::XREAD => {
+            let mut key_stream_start: Vec<Bytes> = Vec::new();
+            let n = (arr.len() - 1) / 2;
+            for i in 1..=n {
+                match (&arr[i], &arr[i + n]) {
+                    (RedisValueRef::String(stream_key), RedisValueRef::String(stream_start)) => {
+                        key_stream_start.push(stream_key.clone());
+                        key_stream_start.push(stream_start.clone());
+                    }
+                    _ => return None,
+                }
+            }
+            None
+        }
     }
 }
