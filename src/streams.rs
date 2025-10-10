@@ -110,7 +110,6 @@ impl Stream {
         let mut blocked_clients = self.blocked.write().await;
         if let Some(notifiers) = blocked_clients.get_mut(&stream_key) {
             if let Some(notifier) = notifiers.pop_front() {
-                println!("Wake up client");
                 let _ = notifier.send(true);
                 if notifiers.is_empty() {
                     blocked_clients.remove(&stream_key);
@@ -415,7 +414,6 @@ impl Stream {
         // Register for the first stream key
         let stream_key = kv[0].clone();
         {
-            println!("blocking created");
             let mut blocked_clients = self.blocked.write().await;
             blocked_clients
                 .entry(stream_key.clone())
@@ -429,19 +427,13 @@ impl Stream {
                 // Got notified - check for new data
                 let res = self.xread(kv).await;
                 if res.is_empty() {
-                    println!("None");
                     RedisValueRef::NullArray
                 } else {
-                    println!("Not none");
                     RedisValueRef::Array(res)
                 }
             }
-            Ok(Err(_)) => {
-                println!("Sender dropped");
-                RedisValueRef::NullArray
-            }
+            Ok(Err(_)) => RedisValueRef::NullArray,
             Err(_) => {
-                println!("Timeout - cleaning up blocked client");
                 let mut blocked_clients = self.blocked.write().await;
                 if let Some(notifiers) = blocked_clients.get_mut(&stream_key) {
                     notifiers.retain(|sender| !sender.is_closed());
@@ -455,7 +447,7 @@ impl Stream {
     }
 }
 
-fn current_unix_timestamp_ms() -> u64 {
+pub fn current_unix_timestamp_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
