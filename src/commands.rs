@@ -345,19 +345,19 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             println!("key_stream_start: {}", key_stream_start.len());
             println!("{:?}", key_stream_start);
             if start == 4 {
-                let duration_f64 = match arr.get(2) {
+                let duration_u64 = match arr.get(2) {
                     Some(val) => match val {
                         RedisValueRef::String(s) => {
-                            std::str::from_utf8(s).unwrap().parse::<f64>().unwrap()
+                            std::str::from_utf8(s).unwrap().parse::<u64>().unwrap()
                         }
                         _ => return None,
                     },
                     None => return None,
                 };
-                let duration = Duration::from_secs_f64(if duration_f64 == 0.0 {
-                    86400.0
+                let duration = Duration::from_millis(if duration_u64 == 0 {
+                    86400
                 } else {
-                    duration_f64
+                    duration_u64
                 });
                 println!("Blocking read duration: {:?}", duration);
                 Some(
