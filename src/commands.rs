@@ -355,12 +355,11 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                     None => return None,
                 };
                 let duration = Duration::from_secs_f64(if duration_f64 == 0.0 {
-                    println!("Indefinete");
                     86400.0
                 } else {
                     duration_f64
                 });
-                println!("Blocking read");
+                println!("Blocking read duration: {:?}", duration);
                 Some(
                     redis
                         .stream
