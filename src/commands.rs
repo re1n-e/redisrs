@@ -328,7 +328,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         Command::XREAD(to_block) => {
             let mut key_stream_start: Vec<Bytes> = Vec::new();
             let start = match to_block.as_ref() {
-                b"BLOCK" => 4,
+                b"block" => 4,
                 _ => 2,
             };
             println!("Start: {start}");
