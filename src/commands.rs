@@ -225,7 +225,7 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             None
         }
         "XREAD" => {
-            if let Some(RedisValueRef::String(k)) = arr.get(2) {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
                 Some(Command::XREAD(k.clone()))
             } else {
                 None
