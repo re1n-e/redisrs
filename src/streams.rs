@@ -403,32 +403,37 @@ impl Stream {
     }
 
     pub async fn blocking_xread(&self, kv: &Vec<Bytes>, duration: Duration) -> Vec<RedisValueRef> {
+        // First check if there's already data
         let mut res = self.xread(kv).await;
-        if res.len() > 0 {
+        if !res.is_empty() {
             return res;
         }
 
+        // No data yet, block and wait
         let (tx, rx) = oneshot::channel::<bool>();
 
+        // Register for the first (and only) stream key
         {
             let mut blocked_clients = self.blocked.write().await;
+            let stream_key = &kv[0];
             blocked_clients
-                .entry(kv[0].clone())
+                .entry(stream_key.clone())
                 .or_default()
                 .push_back(tx);
         }
 
+        // Wait for notification or timeout
         match timeout(duration, rx).await {
-            Ok(Ok(_)) => res = self.xread(kv).await,
+            Ok(Ok(_)) => {
+                // Got notification, read the data
+                res = self.xread(kv).await;
+            }
             Ok(Err(_)) | Err(_) => {
-                let mut blocked_clients = self.blocked.write().await;
-                if let Some(notifiers) = blocked_clients.get_mut(&kv[0]) {
-                    if notifiers.is_empty() {
-                        blocked_clients.remove(&kv[0]);
-                    }
-                }
+                // Timeout or sender dropped - nothing to do
+                // The sender is already consumed or will be dropped
             }
         }
+
         res
     }
 }
