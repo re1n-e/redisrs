@@ -427,8 +427,10 @@ impl Stream {
             Ok(Ok(_)) => {
                 let res = self.xread(kv).await;
                 if res.is_empty() {
+                    println!("None");
                     RedisValueRef::NullArray
                 } else {
+                    println!("Not none");
                     RedisValueRef::Array(res)
                 }
             }
