@@ -159,16 +159,16 @@ impl Stream {
     ) -> Vec<RedisValueRef> {
         let mut res: Vec<RedisValueRef> = Vec::new();
         let (start_ts, start_seq) = if let Some(pos) = memchr(b'-', start) {
-            let ts = Bytes::copy_from_slice(&stream_id[..pos]);
-            let seq = Bytes::copy_from_slice(&stream_id[pos + 1..]);
+            let ts = Bytes::copy_from_slice(&start[..pos]);
+            let seq = Bytes::copy_from_slice(&start[pos + 1..]);
             (ts, seq)
         } else {
             (Bytes::from((0).to_string()), Bytes::from((1).to_string()))
         };
 
         let (end_ts, end_seq) = if let Some(pos) = memchr(b'-', end) {
-            let ts = Bytes::copy_from_slice(&stream_id[..pos]);
-            let seq = Bytes::copy_from_slice(&stream_id[pos + 1..]);
+            let ts = Bytes::copy_from_slice(&end[..pos]);
+            let seq = Bytes::copy_from_slice(&end[pos + 1..]);
             (ts, seq)
         } else {
             (
