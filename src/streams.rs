@@ -437,17 +437,13 @@ impl Stream {
                 }
             }
             Ok(Err(_)) => {
-                // Sender was dropped (shouldn't happen normally)
                 println!("Sender dropped");
                 RedisValueRef::NullArray
             }
             Err(_) => {
-                // Timeout occurred - need to clean up
                 println!("Timeout - cleaning up blocked client");
                 let mut blocked_clients = self.blocked.write().await;
                 if let Some(notifiers) = blocked_clients.get_mut(&stream_key) {
-                    // Remove all closed/dropped senders
-                    // Since our sender was dropped by timeout, this cleans it up
                     notifiers.retain(|sender| !sender.is_closed());
                     if notifiers.is_empty() {
                         blocked_clients.remove(&stream_key);
