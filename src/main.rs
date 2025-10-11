@@ -23,7 +23,7 @@ async fn main() {
                     while let Some(result) = framed.next().await {
                         match result {
                             Ok(value) => {
-                                if let Some(response) = handle_command(value, &redis).await {
+                                if let Some(response) = handle_command(value, addr, &redis).await {
                                     if let Err(e) = framed.send(response).await {
                                         eprintln!("Failed to send response: {:?}", e);
                                         break;

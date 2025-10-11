@@ -1,6 +1,7 @@
 use crate::redis::Redis;
 use crate::resp::RedisValueRef;
 use bytes::Bytes;
+use core::net::SocketAddr;
 use std::sync::Arc;
 use tokio::time::Duration;
 
@@ -13,8 +14,14 @@ pub enum Command {
         expiry: Option<(Bytes, i64)>,
     },
     Get(Bytes),
-    RPUSH(Bytes),
-    LPUSH(Bytes),
+    RPUSH {
+        key: Bytes,
+        values: Vec<Bytes>,
+    },
+    LPUSH {
+        key: Bytes,
+        values: Vec<Bytes>,
+    },
     LLEN(Bytes),
     LRANGE {
         key: Bytes,
@@ -33,15 +40,22 @@ pub enum Command {
     XADD {
         key: Bytes,
         id: Bytes,
+        kv: Vec<Bytes>,
     },
     XRANGE {
         key: Bytes,
         start: Bytes,
         end: Bytes,
     },
-    XREAD(Bytes),
+    XREAD {
+        to_block: Bytes,
+        timeout: Option<Duration>,
+        key_stream_start: Vec<Bytes>,
+    },
     INCR(Bytes),
     MULTI,
+    EXEC,
+    DISCARD,
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -101,11 +115,22 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
 
         "RPUSH" => {
             if let Some(RedisValueRef::String(k)) = arr.get(1) {
-                Some(Command::RPUSH(k.clone()))
+                let mut values = Vec::new();
+                for j in 2..arr.len() {
+                    match &arr[j] {
+                        RedisValueRef::String(s) => values.push(s.clone()),
+                        _ => return None,
+                    }
+                }
+                Some(Command::RPUSH {
+                    key: k.clone(),
+                    values,
+                })
             } else {
                 None
             }
         }
+
         "LRANGE" => {
             if arr.len() == 4 {
                 match (&arr[1], &arr[2], &arr[3]) {
@@ -127,13 +152,25 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+
         "LPUSH" => {
             if let Some(RedisValueRef::String(k)) = arr.get(1) {
-                Some(Command::LPUSH(k.clone()))
+                let mut values = Vec::new();
+                for j in 2..arr.len() {
+                    match &arr[j] {
+                        RedisValueRef::String(s) => values.push(s.clone()),
+                        _ => return None,
+                    }
+                }
+                Some(Command::LPUSH {
+                    key: k.clone(),
+                    values,
+                })
             } else {
                 None
             }
         }
+
         "LLEN" => {
             if let Some(RedisValueRef::String(k)) = arr.get(1) {
                 Some(Command::LLEN(k.clone()))
@@ -141,6 +178,7 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+
         "LPOP" => {
             if let Some(RedisValueRef::String(k)) = arr.get(1) {
                 if arr.len() == 3 {
@@ -164,6 +202,7 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+
         "BLPOP" => {
             if let Some(RedisValueRef::String(k)) = arr.get(1) {
                 let duration_f64 = match arr.get(2) {
@@ -187,6 +226,7 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
             None
         }
+
         "TYPE" => {
             if let Some(RedisValueRef::String(k)) = arr.get(1) {
                 Some(Command::TYPE(k.clone()))
@@ -194,14 +234,25 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+
         "XADD" => {
             if let Some(RedisValueRef::String(k)) = arr.get(1) {
                 if arr.len() >= 3 {
                     match &arr[2] {
-                        RedisValueRef::String(id) => Some(Command::XADD {
-                            key: k.clone(),
-                            id: id.clone(),
-                        }),
+                        RedisValueRef::String(id) => {
+                            let mut kv: Vec<Bytes> = Vec::new();
+                            for i in 3..arr.len() {
+                                match &arr[i] {
+                                    RedisValueRef::String(b) => kv.push(b.clone()),
+                                    _ => return None,
+                                }
+                            }
+                            Some(Command::XADD {
+                                key: k.clone(),
+                                id: id.clone(),
+                                kv,
+                            })
+                        }
                         _ => None,
                     }
                 } else {
@@ -211,6 +262,7 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+
         "XRANGE" => {
             if arr.len() == 4 {
                 match (&arr[1], &arr[2], &arr[3]) {
@@ -230,13 +282,59 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
             None
         }
+
         "XREAD" => {
             if let Some(RedisValueRef::String(k)) = arr.get(1) {
-                Some(Command::XREAD(k.clone()))
+                let mut key_stream_start: Vec<Bytes> = Vec::new();
+                let to_block = k.clone();
+                let start = match to_block.as_ref() {
+                    b"block" => 4,
+                    _ => 2,
+                };
+
+                let timeout = if start == 4 {
+                    let duration_u64 = match arr.get(2) {
+                        Some(val) => match val {
+                            RedisValueRef::String(s) => {
+                                std::str::from_utf8(s).unwrap().parse::<u64>().unwrap()
+                            }
+                            _ => return None,
+                        },
+                        None => return None,
+                    };
+                    Some(Duration::from_millis(if duration_u64 == 0 {
+                        86400
+                    } else {
+                        duration_u64
+                    }))
+                } else {
+                    None
+                };
+
+                let n = (arr.len() - start) / 2;
+                for i in start..(start + n) {
+                    match (&arr[i], &arr[n + i]) {
+                        (
+                            RedisValueRef::String(stream_key),
+                            RedisValueRef::String(stream_start),
+                        ) => {
+                            key_stream_start.push(stream_key.clone());
+                            key_stream_start.push(stream_start.clone());
+                        }
+                        _ => return None,
+                    }
+                }
+
+                Some(Command::XREAD {
+                    to_block,
+                    timeout,
+                    key_stream_start,
+                })
             } else {
                 None
             }
         }
+
         "INCR" => {
             if let Some(RedisValueRef::String(k)) = arr.get(1) {
                 Some(Command::INCR(k.clone()))
@@ -244,18 +342,16 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+
         "MULTI" => Some(Command::MULTI),
+        "EXEC" => Some(Command::EXEC),
+        "DISCARD" => Some(Command::DISCARD),
         _ => None,
     }
 }
 
-pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<RedisValueRef> {
-    let arr = match value {
-        RedisValueRef::Array(ref a) => a,
-        _ => return Some(RedisValueRef::Error(Bytes::from("ERR expected array"))),
-    };
-
-    match parse_command(arr)? {
+async fn execute_command(cmd: Command, redis: &Arc<Redis>) -> Option<RedisValueRef> {
+    match cmd {
         Command::Ping => Some(RedisValueRef::String(Bytes::from("PONG"))),
 
         Command::Echo(message) => Some(RedisValueRef::String(message)),
@@ -270,28 +366,18 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             _ => Some(RedisValueRef::NullBulkString),
         },
 
-        Command::RPUSH(key) => {
+        Command::RPUSH { key, values } => {
             let mut i = 0;
-            for j in 2..arr.len() {
-                match &arr[j] {
-                    RedisValueRef::String(s) => {
-                        i = redis.lists.rpush(&key, s.clone()).await;
-                    }
-                    _ => return None,
-                }
+            for value in values {
+                i = redis.lists.rpush(&key, value).await;
             }
             Some(RedisValueRef::Int(i))
         }
 
-        Command::LPUSH(key) => {
+        Command::LPUSH { key, values } => {
             let mut i = 0;
-            for j in 2..arr.len() {
-                match &arr[j] {
-                    RedisValueRef::String(s) => {
-                        i = redis.lists.lpush(&key, s.clone()).await;
-                    }
-                    _ => return None,
-                }
+            for value in values {
+                i = redis.lists.lpush(&key, value).await;
             }
             Some(RedisValueRef::Int(i))
         }
@@ -305,15 +391,16 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         Command::LPOP { key, count } => match redis.lists.lpop(&key, count).await {
             Some(v) => {
                 if v.len() == 1 {
-                    return Some(v[0].clone());
+                    Some(v[0].clone())
                 } else {
-                    return Some(RedisValueRef::Array(v));
+                    Some(RedisValueRef::Array(v))
                 }
             }
             None => Some(RedisValueRef::NullBulkString),
         },
 
         Command::BLPOP { key, timeout } => Some(redis.lists.blpop(&key, timeout).await),
+
         Command::TYPE(key) => {
             if redis.kv.contains(&key).await {
                 Some(RedisValueRef::String(Bytes::from("string")))
@@ -323,50 +410,19 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                 Some(RedisValueRef::String(Bytes::from("none")))
             }
         }
-        Command::XADD { key, id } => {
-            let mut kv: Vec<Bytes> = Vec::new();
-            for i in 3..arr.len() {
-                match &arr[i] {
-                    RedisValueRef::String(b) => kv.push(b.clone()),
-                    _ => return None,
-                }
-            }
-            Some(redis.stream.xadd(key, id, kv).await)
-        }
+
+        Command::XADD { key, id, kv } => Some(redis.stream.xadd(key, id, kv).await),
+
         Command::XRANGE { key, start, end } => Some(RedisValueRef::Array(
             redis.stream.xrange(&key, &start, &end).await,
         )),
-        Command::XREAD(to_block) => {
-            let mut key_stream_start: Vec<Bytes> = Vec::new();
-            let start = match to_block.as_ref() {
-                b"block" => 4,
-                _ => 2,
-            };
-            let n = (arr.len() - start) / 2;
-            for i in start..(start + n) {
-                match (&arr[i], &arr[n + i]) {
-                    (RedisValueRef::String(stream_key), RedisValueRef::String(stream_start)) => {
-                        key_stream_start.push(stream_key.clone());
-                        key_stream_start.push(stream_start.clone());
-                    }
-                    _ => return None,
-                }
-            }
-            if start == 4 {
-                let duration_u64 = match arr.get(2) {
-                    Some(val) => match val {
-                        RedisValueRef::String(s) => {
-                            std::str::from_utf8(s).unwrap().parse::<u64>().unwrap()
-                        }
-                        _ => return None,
-                    },
-                    None => return None,
-                };
-                let duration = Duration::from_millis(if duration_u64 == 0 {
-                    86400
-                } else {
-                    duration_u64
-                });
+
+        Command::XREAD {
+            to_block,
+            timeout,
+            key_stream_start,
+        } => {
+            if let Some(duration) = timeout {
                 Some(
                     redis
                         .stream
@@ -379,7 +435,56 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                 ))
             }
         }
+
         Command::INCR(key) => Some(redis.kv.incr(&key).await),
-        Command::MULTI => Some(RedisValueRef::String(Bytes::from("OK"))),
+
+        // Transaction commands should never reach here
+        Command::MULTI | Command::EXEC | Command::DISCARD => None,
     }
+}
+
+pub async fn handle_command(
+    value: RedisValueRef,
+    addr: SocketAddr,
+    redis: &Arc<Redis>,
+) -> Option<RedisValueRef> {
+    let arr = match value {
+        RedisValueRef::Array(ref a) => a,
+        _ => return Some(RedisValueRef::Error(Bytes::from("ERR expected array"))),
+    };
+
+    let parsed_command = parse_command(arr)?;
+
+    // Handle transaction control commands immediately
+    match parsed_command {
+        Command::MULTI => {
+            return Some(redis.tr.start_transaction(addr).await);
+        }
+        Command::EXEC => {
+            let cmds = redis.tr.exec_transaction(addr).await;
+            if let Some(cmds) = cmds {
+                let mut results = Vec::new();
+                for cmd in cmds {
+                    if let Some(result) = execute_command(cmd, redis).await {
+                        results.push(result);
+                    }
+                }
+                return Some(RedisValueRef::Array(results));
+            } else {
+                return Some(RedisValueRef::Error(Bytes::from("ERR EXEC without MULTI")));
+            }
+        }
+        Command::DISCARD => {
+            return Some(redis.tr.discard_transaction(addr).await);
+        }
+        _ => {}
+    }
+
+    // If in transaction, queue the command
+    if redis.tr.in_transaction(addr).await {
+        return Some(redis.tr.queue_command(addr, parsed_command).await);
+    }
+
+    // Otherwise execute immediately
+    execute_command(parsed_command, redis).await
 }
