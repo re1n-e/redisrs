@@ -348,7 +348,23 @@ impl Stream {
         // Process each stream key-id pair
         for i in (0..kv.len()).step_by(2) {
             let stream_key = &kv[i];
-            let stream_id = &kv[i + 1];
+            let stream_id = match kv[i + 1].as_ref() {
+                b"$" => {
+                    if let Some(stream) = streams.get(stream_key) {
+                        match stream.map.last_key_value() {
+                            Some(((ts, seq), _)) => {
+                                let ts_str = std::str::from_utf8(&ts).ok().unwrap();
+                                let seq_str = std::str::from_utf8(&seq).ok().unwrap();
+                                &Bytes::from(format!("{}-{}", ts_str, seq_str))
+                            }
+                            None => &Bytes::from(format!("{}-{}", 0, 0)),
+                        }
+                    } else {
+                        &Bytes::from(format!("{}-{}", 0, 0))
+                    }
+                }
+                _ => &kv[i + 1],
+            };
 
             let mut stream_entries: Vec<RedisValueRef> = Vec::new();
 

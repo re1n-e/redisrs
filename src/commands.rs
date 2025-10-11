@@ -1,6 +1,5 @@
 use crate::redis::Redis;
 use crate::resp::RedisValueRef;
-use crate::streams::current_unix_timestamp_ms;
 use bytes::Bytes;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -357,11 +356,6 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                 } else {
                     duration_u64
                 });
-                let length = key_stream_start.len();
-                if key_stream_start[length - 1].as_ref() == b"$" {
-                    let res_id = format!("{}-{}", current_unix_timestamp_ms(), 0);
-                    key_stream_start[length - 1] = Bytes::from(res_id);
-                }
                 Some(
                     redis
                         .stream
