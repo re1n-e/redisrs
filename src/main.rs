@@ -1,3 +1,4 @@
+use clap::Parser;
 use futures::{SinkExt, StreamExt}; // Add this dependency
 use redis::commands::handle_command;
 use redis::redis::Redis;
@@ -6,9 +7,25 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_util::codec::Framed;
 
+/// Simple CLI demo
+#[derive(Parser, Debug)]
+#[command(name = "myapp", version = "1.0", about = "port")]
+struct Args {
+    /// Input file
+    #[arg(short, long)]
+    port: Option<String>,
+}
+
 #[tokio::main]
 async fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let args = Args::parse();
+    let port = match args.port {
+        Some(port) => port,
+        _ => String::from("6379"),
+    };
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        .await
+        .unwrap();
     let redis = Arc::new(Redis::new());
     loop {
         let stream = listener.accept().await;

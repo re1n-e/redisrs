@@ -466,7 +466,7 @@ impl Stream {
                 }
             }
             Ok(Err(_)) => {
-                // Sender was dropped (shouldn't happen normally)
+                // Sender was dropped
                 println!("Sender dropped");
                 RedisValueRef::NullArray
             }

@@ -480,11 +480,9 @@ pub async fn handle_command(
         _ => {}
     }
 
-    // If in transaction, queue the command
     if redis.tr.in_transaction(addr).await {
         return Some(redis.tr.queue_command(addr, parsed_command).await);
     }
 
-    // Otherwise execute immediately
     execute_command(parsed_command, redis).await
 }
