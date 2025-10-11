@@ -4,13 +4,13 @@ use bytes::Bytes;
 use std::sync::Arc;
 use tokio::time::Duration;
 
-enum Command<'a> {
+pub enum Command {
     Ping,
     Echo(Bytes),
     Set {
         key: Bytes,
         value: Bytes,
-        expiry: Option<(&'a Bytes, i64)>,
+        expiry: Option<(Bytes, i64)>,
     },
     Get(Bytes),
     RPUSH(Bytes),
@@ -41,6 +41,7 @@ enum Command<'a> {
     },
     XREAD(Bytes),
     INCR(Bytes),
+    MULTI,
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -73,7 +74,11 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 let expiry = if arr.len() == 5 {
                     match (&arr[3], &arr[4]) {
                         (RedisValueRef::String(s), RedisValueRef::String(i)) => {
-                            Some((s, std::str::from_utf8(i).unwrap().parse::<i64>().unwrap()))
+                            let s = s.clone();
+                            Some((
+                                Bytes::from(s),
+                                std::str::from_utf8(i).unwrap().parse::<i64>().unwrap(),
+                            ))
                         }
                         _ => None,
                     }
@@ -239,6 +244,7 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+        "MULTI" => Some(Command::MULTI),
         _ => None,
     }
 }
@@ -374,5 +380,6 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
             }
         }
         Command::INCR(key) => Some(redis.kv.incr(&key).await),
+        Command::MULTI => Some(RedisValueRef::String(Bytes::from("OK"))),
     }
 }

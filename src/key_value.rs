@@ -20,7 +20,7 @@ impl KeyValue {
         }
     }
 
-    pub async fn insert_entry(&self, key: Bytes, value: Bytes, expiry: Option<(&Bytes, i64)>) {
+    pub async fn insert_entry(&self, key: Bytes, value: Bytes, expiry: Option<(Bytes, i64)>) {
         let mut entries = self.entries.write().await;
 
         let set = if let Some((ty, time)) = expiry {
