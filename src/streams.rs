@@ -348,30 +348,11 @@ impl Stream {
         // Process each stream key-id pair
         for i in (0..kv.len()).step_by(2) {
             let stream_key = &kv[i];
-
-            // Resolve the stream_id, handling the "$" special case
-            let stream_id = match kv[i + 1].as_ref() {
-                b"$" => {
-                    // Get the last entry ID for this stream
-                    if let Some(stream) = streams.get(stream_key) {
-                        match stream.map.last_key_value() {
-                            Some(((ts, seq), _)) => {
-                                let ts_str = std::str::from_utf8(&ts).ok().unwrap();
-                                let seq_str = std::str::from_utf8(&seq).ok().unwrap();
-                                Bytes::from(format!("{}-{}", ts_str, seq_str))
-                            }
-                            None => Bytes::from("0-0"),
-                        }
-                    } else {
-                        Bytes::from("0-0")
-                    }
-                }
-                _ => kv[i + 1].clone(),
-            };
+            let stream_id = &kv[i + 1];
 
             let mut stream_entries: Vec<RedisValueRef> = Vec::new();
 
-            if let Some(pos) = memchr(b'-', &stream_id) {
+            if let Some(pos) = memchr(b'-', stream_id) {
                 let cur_ts = Bytes::copy_from_slice(&stream_id[..pos]);
                 let cur_seq = Bytes::copy_from_slice(&stream_id[pos + 1..]);
 
@@ -421,8 +402,38 @@ impl Stream {
     }
 
     pub async fn blocking_xread(&self, kv: &Vec<Bytes>, duration: Duration) -> RedisValueRef {
-        // First check if there's already data
-        let res = self.xread(kv).await;
+        // Resolve any "$" IDs to actual IDs BEFORE checking for data
+        // This ensures we use the same reference point throughout the blocking operation
+        let mut resolved_kv = Vec::new();
+        {
+            let streams = self.streams.read().await;
+            for i in (0..kv.len()).step_by(2) {
+                let stream_key = &kv[i];
+                let stream_id = match kv[i + 1].as_ref() {
+                    b"$" => {
+                        // Resolve "$" to the last entry ID at the time of the call
+                        if let Some(stream) = streams.get(stream_key) {
+                            match stream.map.last_key_value() {
+                                Some(((ts, seq), _)) => {
+                                    let ts_str = std::str::from_utf8(&ts).ok().unwrap();
+                                    let seq_str = std::str::from_utf8(&seq).ok().unwrap();
+                                    Bytes::from(format!("{}-{}", ts_str, seq_str))
+                                }
+                                None => Bytes::from("0-0"),
+                            }
+                        } else {
+                            Bytes::from("0-0")
+                        }
+                    }
+                    _ => kv[i + 1].clone(),
+                };
+                resolved_kv.push(stream_key.clone());
+                resolved_kv.push(stream_id);
+            }
+        }
+
+        // First check if there's already data using the resolved IDs
+        let res = self.xread(&resolved_kv).await;
         if !res.is_empty() {
             return RedisValueRef::Array(res);
         }
@@ -431,8 +442,9 @@ impl Stream {
         let (tx, rx) = oneshot::channel::<bool>();
 
         // Register for the first stream key
-        let stream_key = kv[0].clone();
+        let stream_key = resolved_kv[0].clone();
         {
+            println!("blocking created");
             let mut blocked_clients = self.blocked.write().await;
             blocked_clients
                 .entry(stream_key.clone())
@@ -443,18 +455,27 @@ impl Stream {
         // Wait for notification or timeout
         match timeout(duration, rx).await {
             Ok(Ok(_)) => {
-                // Got notified - check for new data
-                let res = self.xread(kv).await;
+                // Got notified - check for new data using the same resolved IDs
+                let res = self.xread(&resolved_kv).await;
                 if res.is_empty() {
+                    println!("None");
                     RedisValueRef::NullArray
                 } else {
+                    println!("Not none");
                     RedisValueRef::Array(res)
                 }
             }
-            Ok(Err(_)) => RedisValueRef::NullArray,
+            Ok(Err(_)) => {
+                // Sender was dropped (shouldn't happen normally)
+                println!("Sender dropped");
+                RedisValueRef::NullArray
+            }
             Err(_) => {
+                // Timeout occurred - need to clean up
+                println!("Timeout - cleaning up blocked client");
                 let mut blocked_clients = self.blocked.write().await;
                 if let Some(notifiers) = blocked_clients.get_mut(&stream_key) {
+                    // Remove all closed/dropped senders
                     notifiers.retain(|sender| !sender.is_closed());
                     if notifiers.is_empty() {
                         blocked_clients.remove(&stream_key);
