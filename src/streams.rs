@@ -348,27 +348,30 @@ impl Stream {
         // Process each stream key-id pair
         for i in (0..kv.len()).step_by(2) {
             let stream_key = &kv[i];
+
+            // Resolve the stream_id, handling the "$" special case
             let stream_id = match kv[i + 1].as_ref() {
                 b"$" => {
+                    // Get the last entry ID for this stream
                     if let Some(stream) = streams.get(stream_key) {
                         match stream.map.last_key_value() {
                             Some(((ts, seq), _)) => {
                                 let ts_str = std::str::from_utf8(&ts).ok().unwrap();
                                 let seq_str = std::str::from_utf8(&seq).ok().unwrap();
-                                &Bytes::from(format!("{}-{}", ts_str, seq_str))
+                                Bytes::from(format!("{}-{}", ts_str, seq_str))
                             }
-                            None => &Bytes::from(format!("{}-{}", 0, 0)),
+                            None => Bytes::from("0-0"),
                         }
                     } else {
-                        &Bytes::from(format!("{}-{}", 0, 0))
+                        Bytes::from("0-0")
                     }
                 }
-                _ => &kv[i + 1],
+                _ => kv[i + 1].clone(),
             };
 
             let mut stream_entries: Vec<RedisValueRef> = Vec::new();
 
-            if let Some(pos) = memchr(b'-', stream_id) {
+            if let Some(pos) = memchr(b'-', &stream_id) {
                 let cur_ts = Bytes::copy_from_slice(&stream_id[..pos]);
                 let cur_seq = Bytes::copy_from_slice(&stream_id[pos + 1..]);
 
