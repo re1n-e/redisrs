@@ -40,6 +40,7 @@ enum Command<'a> {
         end: Bytes,
     },
     XREAD(Bytes),
+    INCR(Bytes),
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -231,6 +232,13 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
                 None
             }
         }
+        "INCR" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
+                Some(Command::INCR(k.clone()))
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -247,10 +255,7 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
         Command::Echo(message) => Some(RedisValueRef::String(message)),
 
         Command::Set { key, value, expiry } => {
-            redis
-                .kv
-                .insert_entry(key, RedisValueRef::String(value), expiry)
-                .await;
+            redis.kv.insert_entry(key, value, expiry).await;
             Some(RedisValueRef::String(Bytes::from("OK")))
         }
 
@@ -368,5 +373,6 @@ pub async fn handle_command(value: RedisValueRef, redis: &Arc<Redis>) -> Option<
                 ))
             }
         }
+        Command::INCR(key) => Some(redis.kv.incr(&key).await),
     }
 }
