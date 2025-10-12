@@ -14,6 +14,10 @@ struct Args {
     /// Input file
     #[arg(short, long)]
     port: Option<String>,
+    #[arg(short, long)]
+    dir: Option<String>,
+    #[arg(short, long)]
+    dbfilename: Option<String>,
 }
 
 #[tokio::main]
@@ -23,13 +27,19 @@ async fn main() {
         Some(port) => port,
         _ => String::from("6379"),
     };
+
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
         .await
         .unwrap();
-    let redis = Arc::new(Redis::new());
+
+    let redis = match (args.dir, args.dbfilename) {
+        (Some(dir), Some(dbfilename)) => Arc::new(Redis::new(dir, dbfilename)),
+        (_, _) => Arc::new(Redis::new(String::from(""), String::from(""))),
+    };
     loop {
         let stream = listener.accept().await;
         let redis = redis.clone();
+
         match stream {
             Ok((stream, addr)) => {
                 println!("accepted new connection from: {addr}");

@@ -56,6 +56,10 @@ pub enum Command {
     MULTI,
     EXEC,
     DISCARD,
+    CONFIG {
+        dir: bool,
+        dbfilename: bool,
+    },
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -343,6 +347,20 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
         }
 
+        "CONFIG" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(2) {
+                let (mut dir, mut dbfilename) = (false, false);
+                match k.as_ref() {
+                    b"dir" => dir = true,
+                    b"dbfilename" => dbfilename = true,
+                    _ => (),
+                }
+                Some(Command::CONFIG { dir, dbfilename })
+            } else {
+                None
+            }
+        }
+
         "MULTI" => Some(Command::MULTI),
         "EXEC" => Some(Command::EXEC),
         "DISCARD" => Some(Command::DISCARD),
@@ -433,6 +451,24 @@ async fn execute_command(cmd: Command, redis: &Arc<Redis>) -> Option<RedisValueR
                 Some(RedisValueRef::Array(
                     redis.stream.xread(&key_stream_start).await,
                 ))
+            }
+        }
+
+        Command::CONFIG { dir, dbfilename } => {
+            if dir {
+                let cmd = "dir";
+                Some(RedisValueRef::Array(vec![
+                    RedisValueRef::BulkString(Bytes::from(cmd)),
+                    RedisValueRef::BulkString(Bytes::from(redis.get_dir())),
+                ]))
+            } else if dbfilename {
+                let cmd = "dbfilename";
+                Some(RedisValueRef::Array(vec![
+                    RedisValueRef::BulkString(Bytes::from(cmd)),
+                    RedisValueRef::BulkString(Bytes::from(redis.get_filename())),
+                ]))
+            } else {
+                None
             }
         }
 
