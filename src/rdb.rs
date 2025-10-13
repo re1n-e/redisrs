@@ -458,27 +458,26 @@ impl KeyValue {
     /// Load data from an RDB file
     pub async fn load_from_rdb(&self, rdb_data: &[u8]) -> Result<(), RdbError> {
         let rdb_file = parse_rdb(rdb_data)?;
-
         let mut entries = self.entries.write().await;
 
-        // Load all databases (typically just database 0)
         for database in rdb_file.databases {
             for entry in database.entries {
-                let key = Bytes::from(entry.key);
+                // Skip expired entries
+                if let Some(ref exp) = entry.expire {
+                    if exp.is_expired() {
+                        continue;
+                    }
+                }
 
-                // Extract value
+                let key = Bytes::from(entry.key);
                 let value = match entry.value {
                     Value::String(s) => Bytes::from(s),
                 };
-
                 let expiry = entry.expire.and_then(|exp| exp.to_instant());
 
-                if expiry.is_none() || expiry.map_or(true, |exp| Instant::now() < exp) {
-                    entries.insert(key, Set { value, expiry });
-                }
+                entries.insert(key, Set { value, expiry });
             }
         }
-
         Ok(())
     }
 
