@@ -396,11 +396,8 @@ pub fn parse_rdb(data: &[u8]) -> Result<RdbFile, RdbError> {
     parser.parse()
 }
 
-// Integration with KeyValue store
-use tokio::sync::RwLock;
-
 use crate::resp::RedisValueRef;
-
+use tokio::sync::RwLock;
 struct Set {
     value: Bytes,
     expiry: Option<Instant>,
@@ -418,7 +415,7 @@ impl KeyValue {
     }
 
     /// Load data from an RDB file
-    async fn load_from_rdb(&self, rdb_data: &[u8]) -> Result<(), RdbError> {
+    pub async fn load_from_rdb(&self, rdb_data: &[u8]) -> Result<(), RdbError> {
         let rdb_file = parse_rdb(rdb_data)?;
 
         let mut entries = self.entries.write().await;
@@ -566,6 +563,11 @@ impl KeyValue {
         Ok(1)
     }
 
+    pub async fn get_all_keys(&self) -> Vec<Bytes> {
+        let entries = self.entries.read().await;
+        entries.keys().cloned().collect()
+    }
+
     pub async fn keys(&self, pattern: Bytes) -> RedisValueRef {
         let entries = self.entries.read().await;
         let pattern_str = std::str::from_utf8(&pattern).unwrap_or("*");
@@ -579,7 +581,6 @@ impl KeyValue {
                     }
                 }
             }
-
             // Match pattern
             let key_str = std::str::from_utf8(key).unwrap_or("");
             Self::match_pattern(pattern_str, key_str)
