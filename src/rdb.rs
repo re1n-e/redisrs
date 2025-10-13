@@ -43,6 +43,9 @@ impl Expiry {
 
         // Calculate time until expiry
         let time_until_expiry = expiry_system.duration_since(now_system).ok()?;
+        if now_duration > time_until_expiry {
+            return None;
+        }
         Some(Instant::now() + time_until_expiry)
     }
 
