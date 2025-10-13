@@ -42,7 +42,7 @@ impl Expiry {
         };
 
         // Check if already expired
-        if expiry_system <= now_system {
+        if expiry_system <= now_duration {
             return None;
         }
 
