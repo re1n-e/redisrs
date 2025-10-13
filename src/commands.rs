@@ -60,6 +60,7 @@ pub enum Command {
         dir: bool,
         dbfilename: bool,
     },
+    KEYS(Bytes),
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -361,6 +362,14 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
         }
 
+        "KEYS" => {
+            if let Some(RedisValueRef::String(k)) = arr.get(1) {
+                Some(Command::KEYS(k.clone()))
+            } else {
+                None
+            }
+        }
+
         "MULTI" => Some(Command::MULTI),
         "EXEC" => Some(Command::EXEC),
         "DISCARD" => Some(Command::DISCARD),
@@ -380,7 +389,7 @@ async fn execute_command(cmd: Command, redis: &Arc<Redis>) -> Option<RedisValueR
         }
 
         Command::Get(key) => match redis.kv.get_entry(&key).await {
-            Some(RedisValueRef::String(s)) => Some(RedisValueRef::BulkString(s)),
+            Some(s) => Some(RedisValueRef::BulkString(s)),
             _ => Some(RedisValueRef::NullBulkString),
         },
 
@@ -472,7 +481,12 @@ async fn execute_command(cmd: Command, redis: &Arc<Redis>) -> Option<RedisValueR
             }
         }
 
-        Command::INCR(key) => Some(redis.kv.incr(&key).await),
+        Command::INCR(key) => Some(match redis.kv.incr(&key).await {
+            Ok(num) => RedisValueRef::Int(num),
+            Err(e) => RedisValueRef::Error(Bytes::from(e)),
+        }),
+
+        Command::KEYS(pattern) => Some(redis.kv.keys(pattern).await),
 
         // Transaction commands should never reach here
         Command::MULTI | Command::EXEC | Command::DISCARD => None,

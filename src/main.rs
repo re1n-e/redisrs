@@ -33,7 +33,15 @@ async fn main() {
         .unwrap();
 
     let redis = match (args.dir, args.dbfilename) {
-        (Some(dir), Some(dbfilename)) => Arc::new(Redis::new(dir, dbfilename)),
+        (Some(dir), Some(dbfilename)) => {
+            let redis = Redis::new(dir.clone(), dbfilename.clone());
+            redis
+                .kv
+                .load_from_rdb_file(format!("{dir}/{dbfilename}").as_str())
+                .await
+                .unwrap();
+            Arc::new(redis)
+        }
         (_, _) => Arc::new(Redis::new(String::from(""), String::from(""))),
     };
     loop {
