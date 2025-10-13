@@ -34,8 +34,6 @@ impl Expiry {
     /// Convert RDB expiry (absolute Unix timestamp) to Instant relative to now
     pub fn to_instant(&self) -> Option<Instant> {
         let now_system = SystemTime::now();
-        let now_duration = now_system.duration_since(UNIX_EPOCH).ok()?;
-
         let expiry_system = match self {
             Expiry::Seconds(secs) => UNIX_EPOCH + Duration::from_secs(*secs as u64),
             Expiry::Milliseconds(millis) => UNIX_EPOCH + Duration::from_millis(*millis),
@@ -43,7 +41,7 @@ impl Expiry {
 
         // Calculate time until expiry
         let time_until_expiry = expiry_system.duration_since(now_system).ok()?;
-        if now_duration > time_until_expiry {
+        if expiry_system <= now_system {
             return None;
         }
         Some(Instant::now() + time_until_expiry)
@@ -58,7 +56,6 @@ impl Expiry {
 #[derive(Debug, Clone)]
 pub enum Value {
     String(String),
-    // TODO: Add more types as needed (List, Set, ZSet, Hash, etc.)
 }
 
 #[derive(Debug)]
@@ -474,7 +471,6 @@ impl KeyValue {
                 // Convert expiry
                 let expiry = entry.expire.and_then(|exp| exp.to_instant());
 
-                // Only insert if not already expired
                 if expiry.is_none() || expiry.map_or(true, |exp| Instant::now() < exp) {
                     entries.insert(key, Set { value, expiry });
                 }
