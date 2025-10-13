@@ -34,16 +34,19 @@ impl Expiry {
     /// Convert RDB expiry (absolute Unix timestamp) to Instant relative to now
     pub fn to_instant(&self) -> Option<Instant> {
         let now_system = SystemTime::now();
+
         let expiry_system = match self {
             Expiry::Seconds(secs) => UNIX_EPOCH + Duration::from_secs(*secs as u64),
             Expiry::Milliseconds(millis) => UNIX_EPOCH + Duration::from_millis(*millis),
         };
 
-        // Calculate time until expiry
-        let time_until_expiry = expiry_system.duration_since(now_system).ok()?;
+        // If expiry is in the past, return None (expired)
         if expiry_system <= now_system {
             return None;
         }
+
+        // Calculate time until expiry
+        let time_until_expiry = expiry_system.duration_since(now_system).ok()?;
         Some(Instant::now() + time_until_expiry)
     }
 
