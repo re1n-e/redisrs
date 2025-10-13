@@ -1,6 +1,7 @@
 use crate::redis::Redis;
 use crate::resp::RedisValueRef;
 use bytes::Bytes;
+use clap::builder::Str;
 use core::net::SocketAddr;
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -61,6 +62,7 @@ pub enum Command {
         dbfilename: bool,
     },
     KEYS(Bytes),
+    INFO(Bytes),
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -370,6 +372,14 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
         }
 
+        "INFO" => {
+            if let Some(RedisValueRef::String(repl)) = arr.get(1) {
+                Some(Command::INFO(repl.clone()))
+            } else {
+                None
+            }
+        }
+
         "MULTI" => Some(Command::MULTI),
         "EXEC" => Some(Command::EXEC),
         "DISCARD" => Some(Command::DISCARD),
@@ -487,6 +497,10 @@ async fn execute_command(cmd: Command, redis: &Arc<Redis>) -> Option<RedisValueR
         }),
 
         Command::KEYS(pattern) => Some(redis.kv.keys(pattern).await),
+
+        Command::INFO(_repl) => Some(RedisValueRef::BulkString(Bytes::from(String::from(
+            "role:master",
+        )))),
 
         // Transaction commands should never reach here
         Command::MULTI | Command::EXEC | Command::DISCARD => None,

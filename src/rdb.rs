@@ -209,7 +209,6 @@ impl<R: Read> RdbParser<R> {
                     match self.reader.read_exact(&mut checksum) {
                         Ok(_) => {
                             // TODO: Implement actual CRC64 validation
-                            // For now, just acknowledge we read it
                         }
                         Err(_) => {
                             // Some RDB files might not have checksum
