@@ -222,47 +222,49 @@ impl<R: Read> RdbParser<R> {
         let mut entries = Vec::new();
 
         // Check for hash table size info
-        let mut byte = [0u8; 1];
-        self.reader.read_exact(&mut byte)?;
+        let byte = self.read_byte()?;
 
-        if byte[0] == 0xFB {
+        if byte == 0xFB {
             key_value_hash_size = self.parse_length()?;
             expire_hash_size = self.parse_length()?;
-
-            // Read the first byte after hash table sizes
-            self.reader.read_exact(&mut byte)?;
+            // After hash table sizes, the next bytes are key-value pairs
+            // Don't put the byte back - we'll read fresh in the loop
+        } else {
+            // Put the byte back - it's the start of a key-value pair (value type or expiry)
+            self.peeked_byte = Some(byte);
         }
 
         // Parse key-value pairs
         loop {
-            match byte[0] {
-                0xFC | 0xFD | 0x00..=0x0E => {
-                    // Parse key-value pair
-                    let entry = self.parse_key_value_pair(byte[0])?;
+            let byte = match self.read_byte() {
+                Ok(b) => b,
+                Err(RdbError::IoError(e)) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e),
+            };
+
+            match byte {
+                // Expiry markers or value types (0x00 = string type)
+                0xFC | 0xFD => {
+                    // This is an expiry marker, parse_key_value_pair will handle it
+                    let entry = self.parse_key_value_pair(byte)?;
+                    entries.push(entry);
+                }
+                0x00..=0x0E => {
+                    // This is a value type byte (0x00 = string, 0x01-0x0E = other types)
+                    let entry = self.parse_key_value_pair(byte)?;
                     entries.push(entry);
                 }
                 0xFE | 0xFF => {
-                    // End of database or file - don't consume this byte
-                    return Ok(Database {
-                        index,
-                        key_value_hash_size,
-                        expire_hash_size,
-                        entries,
-                    });
+                    // End of database or file - put byte back for parse_databases
+                    self.peeked_byte = Some(byte);
+                    break;
                 }
                 _ => {
                     return Err(RdbError::InvalidFormat(format!(
-                        "Unexpected value type: 0x{:02X}",
-                        byte[0]
+                        "Unexpected byte in database: 0x{:02X}",
+                        byte
                     )));
                 }
-            }
-
-            // Read next byte
-            match self.reader.read_exact(&mut byte) {
-                Ok(_) => {}
-                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-                Err(e) => return Err(e.into()),
             }
         }
 
