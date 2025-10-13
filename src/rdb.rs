@@ -2,7 +2,6 @@ use bytes::Bytes;
 use std::collections::HashMap;
 use std::io::{self, Cursor, Read};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
 #[derive(Debug, Clone)]
 pub struct RdbFile {
     pub version: String,
@@ -32,30 +31,36 @@ pub enum Expiry {
 }
 
 impl Expiry {
-    /// Convert RDB expiry to Instant relative to now
+    /// Convert RDB expiry (absolute Unix timestamp) to Instant relative to now
     pub fn to_instant(&self) -> Option<Instant> {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+        let now_system = SystemTime::now();
+        let now_duration = now_system.duration_since(UNIX_EPOCH).ok()?;
 
-        let expiry_duration = match self {
-            Expiry::Seconds(secs) => Duration::from_secs(*secs as u64),
-            Expiry::Milliseconds(millis) => Duration::from_millis(*millis),
+        let expiry_system = match self {
+            Expiry::Seconds(secs) => UNIX_EPOCH + Duration::from_secs(*secs as u64),
+            Expiry::Milliseconds(millis) => UNIX_EPOCH + Duration::from_millis(*millis),
         };
 
-        // Check if expiry is in the future
-        if expiry_duration > now {
-            let time_until_expiry = expiry_duration - now;
-            Some(Instant::now() + time_until_expiry)
-        } else {
-            // Already expired
-            None
+        // Check if already expired
+        if expiry_system <= now_system {
+            return None;
         }
+
+        // Calculate time until expiry
+        let time_until_expiry = expiry_system.duration_since(now_system).ok()?;
+        Some(Instant::now() + time_until_expiry)
+    }
+
+    /// Check if this expiry has already passed
+    pub fn is_expired(&self) -> bool {
+        self.to_instant().is_none()
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum Value {
     String(String),
-    // Add more types as needed
+    // TODO: Add more types as needed (List, Set, ZSet, Hash, etc.)
 }
 
 #[derive(Debug)]
@@ -64,6 +69,7 @@ pub enum RdbError {
     InvalidHeader,
     InvalidFormat(String),
     UnexpectedEof,
+    ChecksumMismatch,
 }
 
 impl From<io::Error> for RdbError {
@@ -71,6 +77,20 @@ impl From<io::Error> for RdbError {
         RdbError::IoError(err)
     }
 }
+
+impl std::fmt::Display for RdbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RdbError::IoError(e) => write!(f, "IO error: {}", e),
+            RdbError::InvalidHeader => write!(f, "Invalid RDB header"),
+            RdbError::InvalidFormat(s) => write!(f, "Invalid format: {}", s),
+            RdbError::UnexpectedEof => write!(f, "Unexpected end of file"),
+            RdbError::ChecksumMismatch => write!(f, "Checksum validation failed"),
+        }
+    }
+}
+
+impl std::error::Error for RdbError {}
 
 pub struct RdbParser<R: Read> {
     reader: R,
@@ -140,10 +160,9 @@ impl<R: Read> RdbParser<R> {
         let mut metadata = HashMap::new();
 
         loop {
-            let mut byte = [0u8; 1];
-            self.reader.read_exact(&mut byte)?;
+            let byte = self.read_byte()?;
 
-            match byte[0] {
+            match byte {
                 0xFA => {
                     // Metadata subsection
                     let key = self.parse_string()?;
@@ -151,18 +170,19 @@ impl<R: Read> RdbParser<R> {
                     metadata.insert(key, value);
                 }
                 0xFE => {
-                    // Start of database section, put byte back conceptually
-                    // We'll need to handle this differently
+                    // Start of database section - preserve byte for parse_databases
+                    self.peeked_byte = Some(0xFE);
                     return Ok(metadata);
                 }
                 0xFF => {
-                    // End of file
+                    // End of file - preserve byte for parse_databases
+                    self.peeked_byte = Some(0xFF);
                     return Ok(metadata);
                 }
                 _ => {
                     return Err(RdbError::InvalidFormat(format!(
                         "Unexpected byte in metadata: 0x{:02X}",
-                        byte[0]
+                        byte
                     )));
                 }
             }
@@ -171,40 +191,38 @@ impl<R: Read> RdbParser<R> {
 
     fn parse_databases(&mut self) -> Result<Vec<Database>, RdbError> {
         let mut databases = Vec::new();
-        let mut first_iteration = true;
 
         loop {
-            let mut byte = [0u8; 1];
+            let byte = match self.read_byte() {
+                Ok(b) => b,
+                Err(RdbError::IoError(e)) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e),
+            };
 
-            // If not first iteration and we just parsed a database,
-            // the last byte read might be FE or FF already
-            if !first_iteration {
-                match self.reader.read_exact(&mut byte) {
-                    Ok(_) => {}
-                    Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-                    Err(e) => return Err(e.into()),
-                }
-            } else {
-                self.reader.read_exact(&mut byte)?;
-                first_iteration = false;
-            }
-
-            match byte[0] {
+            match byte {
                 0xFE => {
                     // Database subsection
                     let db = self.parse_database()?;
                     databases.push(db);
                 }
                 0xFF => {
-                    // End of file, skip checksum
-                    let mut _checksum = [0u8; 8];
-                    let _ = self.reader.read_exact(&mut _checksum);
+                    // End of file - read and validate checksum
+                    let mut checksum = [0u8; 8];
+                    match self.reader.read_exact(&mut checksum) {
+                        Ok(_) => {
+                            // TODO: Implement actual CRC64 validation
+                            // For now, just acknowledge we read it
+                        }
+                        Err(_) => {
+                            // Some RDB files might not have checksum
+                        }
+                    }
                     break;
                 }
                 _ => {
                     return Err(RdbError::InvalidFormat(format!(
                         "Unexpected byte in database section: 0x{:02X}",
-                        byte[0]
+                        byte
                     )));
                 }
             }
@@ -221,20 +239,18 @@ impl<R: Read> RdbParser<R> {
         let mut expire_hash_size = 0;
         let mut entries = Vec::new();
 
-        // Peek next byte to check for RESIZEDB (0xFB)
+        // Check for hash table size info (0xFB)
         let byte = self.read_byte()?;
 
         if byte == 0xFB {
-            // RESIZEDB: next two lengths (hash + expire)
             key_value_hash_size = self.parse_length()?;
             expire_hash_size = self.parse_length()?;
-            // continue to next byte (start of key-value entries)
         } else {
-            // not RESIZEDB — put it back
+            // Not a hash table size marker - this is the start of key-value pairs
             self.peeked_byte = Some(byte);
         }
 
-        // Now parse key-value pairs until FE/FF
+        // Parse key-value pairs
         loop {
             let byte = match self.read_byte() {
                 Ok(b) => b,
@@ -243,25 +259,25 @@ impl<R: Read> RdbParser<R> {
             };
 
             match byte {
+                // Expiry markers
                 0xFC | 0xFD => {
-                    // expiry marker
                     let entry = self.parse_key_value_pair(byte)?;
                     entries.push(entry);
                 }
+                // Value type bytes (0x00 = string, 0x01-0x0E = other types)
                 0x00..=0x0E => {
-                    // value type
                     let entry = self.parse_key_value_pair(byte)?;
                     entries.push(entry);
                 }
+                // End of database or file
                 0xFE | 0xFF => {
-                    // end of db/file
                     self.peeked_byte = Some(byte);
                     break;
                 }
                 _ => {
                     return Err(RdbError::InvalidFormat(format!(
-                        "Unexpected byte in database: 0x{:02X}",
-                        byte
+                        "Unexpected byte in database {}: 0x{:02X}",
+                        index, byte
                     )));
                 }
             }
@@ -278,29 +294,35 @@ impl<R: Read> RdbParser<R> {
     fn parse_key_value_pair(&mut self, first_byte: u8) -> Result<KeyValuePair, RdbError> {
         let mut expire = None;
 
-        // Handle expiry markers
+        // Check for expiry information
         let value_type = match first_byte {
             0xFC => {
+                // Expire in milliseconds (8 bytes, little-endian)
                 let mut ts_bytes = [0u8; 8];
                 self.reader.read_exact(&mut ts_bytes)?;
                 let timestamp = u64::from_le_bytes(ts_bytes);
                 expire = Some(Expiry::Milliseconds(timestamp));
-                self.read_byte()? // next byte is value type
+
+                // Read actual value type
+                self.read_byte()?
             }
             0xFD => {
+                // Expire in seconds (4 bytes, little-endian)
                 let mut ts_bytes = [0u8; 4];
                 self.reader.read_exact(&mut ts_bytes)?;
                 let timestamp = u32::from_le_bytes(ts_bytes);
                 expire = Some(Expiry::Seconds(timestamp));
-                self.read_byte()? // next byte is value type
+
+                // Read actual value type
+                self.read_byte()?
             }
             _ => first_byte,
         };
 
-        // Parse key string
+        // Parse key
         let key = self.parse_string()?;
 
-        // Parse value
+        // Parse value based on type
         let value = match value_type {
             0x00 => {
                 // String type
@@ -309,8 +331,8 @@ impl<R: Read> RdbParser<R> {
             }
             _ => {
                 return Err(RdbError::InvalidFormat(format!(
-                    "Unsupported value type: 0x{:02X}",
-                    value_type
+                    "Unsupported value type: 0x{:02X} for key '{}'",
+                    value_type, key
                 )));
             }
         };
@@ -329,7 +351,7 @@ impl<R: Read> RdbParser<R> {
                 Ok((byte & 0x3F) as u64)
             }
             0b01 => {
-                // Length is in next 14 bits (6 + 8)
+                // Length is in next 14 bits (6 bits + 8 bits)
                 let next_byte = self.read_byte()?;
                 let len = (((byte & 0x3F) as u64) << 8) | (next_byte as u64);
                 Ok(len)
@@ -341,7 +363,7 @@ impl<R: Read> RdbParser<R> {
                 Ok(u32::from_be_bytes(len_bytes) as u64)
             }
             0b11 => {
-                // Special encoding - return the format indicator
+                // Special encoding format indicator
                 Ok(byte as u64)
             }
             _ => unreachable!(),
