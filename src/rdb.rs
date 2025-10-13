@@ -471,7 +471,6 @@ impl KeyValue {
                     Value::String(s) => Bytes::from(s),
                 };
 
-                // Convert expiry
                 let expiry = entry.expire.and_then(|exp| exp.to_instant());
 
                 if expiry.is_none() || expiry.map_or(true, |exp| Instant::now() < exp) {
