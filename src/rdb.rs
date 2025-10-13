@@ -420,15 +420,41 @@ struct Set {
     expiry: Option<Instant>,
 }
 
+pub struct RdbPath {
+    dir: String,
+    dbfilename: String,
+}
+
+impl RdbPath {
+    pub fn new() -> Self {
+        RdbPath {
+            dir: String::new(),
+            dbfilename: String::new(),
+        }
+    }
+}
+
 pub struct KeyValue {
     entries: RwLock<HashMap<Bytes, Set>>,
+    path: RwLock<RdbPath>,
 }
 
 impl KeyValue {
     pub fn new() -> Self {
         KeyValue {
             entries: RwLock::new(HashMap::new()),
+            path: RwLock::new(RdbPath::new()),
         }
+    }
+
+    pub async fn get_dir(&self) -> String {
+        let path = self.path.read().await;
+        path.dir.clone()
+    }
+
+    pub async fn get_filename(&self) -> String {
+        let path = self.path.read().await;
+        path.dbfilename.clone()
     }
 
     /// Load data from an RDB file
@@ -461,8 +487,16 @@ impl KeyValue {
     }
 
     /// Load data from an RDB file path
-    pub async fn load_from_rdb_file(&self, path: &str) -> Result<(), RdbError> {
-        let data = std::fs::read(path).map_err(RdbError::IoError)?;
+    pub async fn load_from_rdb_file(
+        &self,
+        dir: String,
+        dbfilename: String,
+    ) -> Result<(), RdbError> {
+        let mut path = self.path.write().await;
+        path.dbfilename = dbfilename;
+        path.dir = dir;
+        let data = std::fs::read(format!("{}/{}", path.dir, path.dbfilename))
+            .map_err(RdbError::IoError)?;
         self.load_from_rdb(&data).await
     }
 

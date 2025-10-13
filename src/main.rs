@@ -32,22 +32,19 @@ async fn main() {
         .await
         .unwrap();
 
-    let redis = match (args.dir, args.dbfilename) {
-        (Some(dir), Some(dbfilename)) => {
-            let redis = Redis::new(dir.clone(), dbfilename.clone());
-            redis
-                .kv
-                .load_from_rdb_file(format!("{dir}/{dbfilename}").as_str())
-                .await
-                .unwrap();
-            Arc::new(redis)
-        }
-        (_, _) => Arc::new(Redis::new(String::from(""), String::from(""))),
-    };
+    let redis = Arc::new(Redis::new());
     loop {
         let stream = listener.accept().await;
         let redis = redis.clone();
-
+        let _ = match (&args.dir, &args.dbfilename) {
+            (Some(dir), Some(filename)) => {
+                redis
+                    .kv
+                    .load_from_rdb_file(dir.clone(), filename.clone())
+                    .await
+            }
+            _ => Ok(()),
+        };
         match stream {
             Ok((stream, addr)) => {
                 println!("accepted new connection from: {addr}");

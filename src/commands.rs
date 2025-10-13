@@ -468,13 +468,13 @@ async fn execute_command(cmd: Command, redis: &Arc<Redis>) -> Option<RedisValueR
                 let cmd = "dir";
                 Some(RedisValueRef::Array(vec![
                     RedisValueRef::BulkString(Bytes::from(cmd)),
-                    RedisValueRef::BulkString(Bytes::from(redis.get_dir())),
+                    RedisValueRef::BulkString(Bytes::from(redis.kv.get_dir().await)),
                 ]))
             } else if dbfilename {
                 let cmd = "dbfilename";
                 Some(RedisValueRef::Array(vec![
                     RedisValueRef::BulkString(Bytes::from(cmd)),
-                    RedisValueRef::BulkString(Bytes::from(redis.get_filename())),
+                    RedisValueRef::BulkString(Bytes::from(redis.kv.get_filename().await)),
                 ]))
             } else {
                 None
