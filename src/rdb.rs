@@ -74,11 +74,35 @@ impl From<io::Error> for RdbError {
 
 pub struct RdbParser<R: Read> {
     reader: R,
+    peeked_byte: Option<u8>,
 }
 
 impl<R: Read> RdbParser<R> {
     pub fn new(reader: R) -> Self {
-        RdbParser { reader }
+        RdbParser {
+            reader,
+            peeked_byte: None,
+        }
+    }
+
+    fn read_byte(&mut self) -> Result<u8, RdbError> {
+        if let Some(byte) = self.peeked_byte.take() {
+            return Ok(byte);
+        }
+
+        let mut buf = [0u8; 1];
+        self.reader.read_exact(&mut buf)?;
+        Ok(buf[0])
+    }
+
+    fn peek_byte(&mut self) -> Result<u8, RdbError> {
+        if let Some(byte) = self.peeked_byte {
+            return Ok(byte);
+        }
+
+        let byte = self.read_byte()?;
+        self.peeked_byte = Some(byte);
+        Ok(byte)
     }
 
     pub fn parse(&mut self) -> Result<RdbFile, RdbError> {
@@ -127,7 +151,8 @@ impl<R: Read> RdbParser<R> {
                     metadata.insert(key, value);
                 }
                 0xFE => {
-                    // Start of database section
+                    // Start of database section, put byte back conceptually
+                    // We'll need to handle this differently
                     return Ok(metadata);
                 }
                 0xFF => {
@@ -146,13 +171,22 @@ impl<R: Read> RdbParser<R> {
 
     fn parse_databases(&mut self) -> Result<Vec<Database>, RdbError> {
         let mut databases = Vec::new();
+        let mut first_iteration = true;
 
         loop {
             let mut byte = [0u8; 1];
-            match self.reader.read_exact(&mut byte) {
-                Ok(_) => {}
-                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-                Err(e) => return Err(e.into()),
+
+            // If not first iteration and we just parsed a database,
+            // the last byte read might be FE or FF already
+            if !first_iteration {
+                match self.reader.read_exact(&mut byte) {
+                    Ok(_) => {}
+                    Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                    Err(e) => return Err(e.into()),
+                }
+            } else {
+                self.reader.read_exact(&mut byte)?;
+                first_iteration = false;
             }
 
             match byte[0] {
@@ -194,31 +228,33 @@ impl<R: Read> RdbParser<R> {
         if byte[0] == 0xFB {
             key_value_hash_size = self.parse_length()?;
             expire_hash_size = self.parse_length()?;
-        } else {
-            //start of a key-value pair
-            // We'll handle this by processing it in the loop
+
+            // Read the first byte after hash table sizes
+            self.reader.read_exact(&mut byte)?;
         }
 
         // Parse key-value pairs
         loop {
-            if byte[0] != 0xFB {
-                // Process the byte we already read
-                match byte[0] {
-                    0xFC | 0xFD | 0x00..=0x0E => {
-                        // Parse key-value pair
-                        let entry = self.parse_key_value_pair(byte[0])?;
-                        entries.push(entry);
-                    }
-                    0xFE | 0xFF => {
-                        // End of database or file
-                        return Ok(Database {
-                            index,
-                            key_value_hash_size,
-                            expire_hash_size,
-                            entries,
-                        });
-                    }
-                    _ => {}
+            match byte[0] {
+                0xFC | 0xFD | 0x00..=0x0E => {
+                    // Parse key-value pair
+                    let entry = self.parse_key_value_pair(byte[0])?;
+                    entries.push(entry);
+                }
+                0xFE | 0xFF => {
+                    // End of database or file - don't consume this byte
+                    return Ok(Database {
+                        index,
+                        key_value_hash_size,
+                        expire_hash_size,
+                        entries,
+                    });
+                }
+                _ => {
+                    return Err(RdbError::InvalidFormat(format!(
+                        "Unexpected value type: 0x{:02X}",
+                        byte[0]
+                    )));
                 }
             }
 
@@ -227,11 +263,6 @@ impl<R: Read> RdbParser<R> {
                 Ok(_) => {}
                 Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
                 Err(e) => return Err(e.into()),
-            }
-
-            // Check if we've reached the end of this database
-            if byte[0] == 0xFE || byte[0] == 0xFF {
-                break;
             }
         }
 
@@ -256,9 +287,7 @@ impl<R: Read> RdbParser<R> {
                 expire = Some(Expiry::Milliseconds(timestamp));
 
                 // Read actual value type
-                let mut vt = [0u8; 1];
-                self.reader.read_exact(&mut vt)?;
-                vt[0]
+                self.read_byte()?
             }
             0xFD => {
                 // Expire in seconds
@@ -268,9 +297,7 @@ impl<R: Read> RdbParser<R> {
                 expire = Some(Expiry::Seconds(timestamp));
 
                 // Read actual value type
-                let mut vt = [0u8; 1];
-                self.reader.read_exact(&mut vt)?;
-                vt[0]
+                self.read_byte()?
             }
             _ => first_byte,
         };
@@ -297,21 +324,19 @@ impl<R: Read> RdbParser<R> {
     }
 
     fn parse_length(&mut self) -> Result<u64, RdbError> {
-        let mut byte = [0u8; 1];
-        self.reader.read_exact(&mut byte)?;
+        let byte = self.read_byte()?;
 
-        let first_two_bits = (byte[0] & 0xC0) >> 6;
+        let first_two_bits = (byte & 0xC0) >> 6;
 
         match first_two_bits {
             0b00 => {
                 // Length is in the remaining 6 bits
-                Ok((byte[0] & 0x3F) as u64)
+                Ok((byte & 0x3F) as u64)
             }
             0b01 => {
                 // Length is in next 14 bits (6 + 8)
-                let mut next_byte = [0u8; 1];
-                self.reader.read_exact(&mut next_byte)?;
-                let len = (((byte[0] & 0x3F) as u64) << 8) | (next_byte[0] as u64);
+                let next_byte = self.read_byte()?;
+                let len = (((byte & 0x3F) as u64) << 8) | (next_byte as u64);
                 Ok(len)
             }
             0b10 => {
@@ -322,7 +347,7 @@ impl<R: Read> RdbParser<R> {
             }
             0b11 => {
                 // Special encoding - return the format indicator
-                Ok(byte[0] as u64)
+                Ok(byte as u64)
             }
             _ => unreachable!(),
         }
@@ -334,9 +359,8 @@ impl<R: Read> RdbParser<R> {
         match size {
             0xC0 => {
                 // 8-bit integer
-                let mut byte = [0u8; 1];
-                self.reader.read_exact(&mut byte)?;
-                Ok(byte[0].to_string())
+                let byte = self.read_byte()?;
+                Ok(byte.to_string())
             }
             0xC1 => {
                 // 16-bit integer (little-endian)
