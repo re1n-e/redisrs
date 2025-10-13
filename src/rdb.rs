@@ -221,20 +221,20 @@ impl<R: Read> RdbParser<R> {
         let mut expire_hash_size = 0;
         let mut entries = Vec::new();
 
-        // Check for hash table size info
+        // Peek next byte to check for RESIZEDB (0xFB)
         let byte = self.read_byte()?;
 
         if byte == 0xFB {
+            // RESIZEDB: next two lengths (hash + expire)
             key_value_hash_size = self.parse_length()?;
             expire_hash_size = self.parse_length()?;
-            // After hash table sizes, the next bytes are key-value pairs
-            // Don't put the byte back - we'll read fresh in the loop
+            // continue to next byte (start of key-value entries)
         } else {
-            // Put the byte back - it's the start of a key-value pair (value type or expiry)
+            // not RESIZEDB — put it back
             self.peeked_byte = Some(byte);
         }
 
-        // Parse key-value pairs
+        // Now parse key-value pairs until FE/FF
         loop {
             let byte = match self.read_byte() {
                 Ok(b) => b,
@@ -243,19 +243,18 @@ impl<R: Read> RdbParser<R> {
             };
 
             match byte {
-                // Expiry markers or value types (0x00 = string type)
                 0xFC | 0xFD => {
-                    // This is an expiry marker, parse_key_value_pair will handle it
+                    // expiry marker
                     let entry = self.parse_key_value_pair(byte)?;
                     entries.push(entry);
                 }
                 0x00..=0x0E => {
-                    // This is a value type byte (0x00 = string, 0x01-0x0E = other types)
+                    // value type
                     let entry = self.parse_key_value_pair(byte)?;
                     entries.push(entry);
                 }
                 0xFE | 0xFF => {
-                    // End of database or file - put byte back for parse_databases
+                    // end of db/file
                     self.peeked_byte = Some(byte);
                     break;
                 }
@@ -279,35 +278,29 @@ impl<R: Read> RdbParser<R> {
     fn parse_key_value_pair(&mut self, first_byte: u8) -> Result<KeyValuePair, RdbError> {
         let mut expire = None;
 
-        // Check for expiry information
+        // Handle expiry markers
         let value_type = match first_byte {
             0xFC => {
-                // Expire in milliseconds
                 let mut ts_bytes = [0u8; 8];
                 self.reader.read_exact(&mut ts_bytes)?;
                 let timestamp = u64::from_le_bytes(ts_bytes);
                 expire = Some(Expiry::Milliseconds(timestamp));
-
-                // Read actual value type
-                self.read_byte()?
+                self.read_byte()? // next byte is value type
             }
             0xFD => {
-                // Expire in seconds
                 let mut ts_bytes = [0u8; 4];
                 self.reader.read_exact(&mut ts_bytes)?;
                 let timestamp = u32::from_le_bytes(ts_bytes);
                 expire = Some(Expiry::Seconds(timestamp));
-
-                // Read actual value type
-                self.read_byte()?
+                self.read_byte()? // next byte is value type
             }
             _ => first_byte,
         };
 
-        // Parse key
+        // Parse key string
         let key = self.parse_string()?;
 
-        // Parse value based on type
+        // Parse value
         let value = match value_type {
             0x00 => {
                 // String type
