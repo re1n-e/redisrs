@@ -41,11 +41,6 @@ impl Expiry {
             Expiry::Milliseconds(millis) => UNIX_EPOCH + Duration::from_millis(*millis),
         };
 
-        // Check if already expired
-        if expiry_system <= now_duration {
-            return None;
-        }
-
         // Calculate time until expiry
         let time_until_expiry = expiry_system.duration_since(now_system).ok()?;
         Some(Instant::now() + time_until_expiry)
