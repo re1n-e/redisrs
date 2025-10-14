@@ -17,3 +17,4 @@ tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 clap = { version = "4", features = ["derive"] }
 memchr = "2"
+hex = "0.4"

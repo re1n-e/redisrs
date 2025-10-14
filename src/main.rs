@@ -136,6 +136,10 @@ async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
             println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
 
             // TODO: Parse and load the RDB file sent after FULLRESYNC
+            let empty_rdb = hex::decode("524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2").unwrap();
+            let rdb_response = format!("${}\r\n", empty_rdb.len());
+            stream.write_all(rdb_response.as_bytes()).await.unwrap();
+            stream.write_all(&empty_rdb).await.unwrap();
         }
         Err(e) => {
             eprintln!("Failed to connect to master: {}", e);
