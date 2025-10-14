@@ -18,6 +18,8 @@ struct Args {
     dir: Option<String>,
     #[arg(short, long)]
     dbfilename: Option<String>,
+    #[arg(short, long)]
+    replicaof: Option<String>,
 }
 
 #[tokio::main]
@@ -31,7 +33,6 @@ async fn main() {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
         .await
         .unwrap();
-
     let redis = Arc::new(Redis::new());
     loop {
         let stream = listener.accept().await;
@@ -44,6 +45,10 @@ async fn main() {
                     .await
             }
             _ => Ok(()),
+        };
+        let _ = match &args.replicaof {
+            Some(_) => redis.info.set_role("slave").await,
+            _ => (),
         };
         match stream {
             Ok((stream, addr)) => {

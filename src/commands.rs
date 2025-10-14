@@ -498,9 +498,7 @@ async fn execute_command(cmd: Command, redis: &Arc<Redis>) -> Option<RedisValueR
 
         Command::KEYS(pattern) => Some(redis.kv.keys(pattern).await),
 
-        Command::INFO(_repl) => Some(RedisValueRef::BulkString(Bytes::from(String::from(
-            "role:master",
-        )))),
+        Command::INFO(_repl) => Some(redis.info.serialize().await),
 
         // Transaction commands should never reach here
         Command::MULTI | Command::EXEC | Command::DISCARD => None,

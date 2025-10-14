@@ -1,38 +1,116 @@
 use crate::lists::List;
 use crate::rdb::KeyValue;
+use crate::resp::RedisValueRef;
 use crate::streams::Stream;
 use crate::transactions::Transaction;
-
-pub enum Role {
-    Master,
-    Slave,
-}
-
+use tokio::sync::RwLock;
 pub struct Info {
-    role: Role,
-    connected_slaves: u64,
-    master_replid: String,
-    master_repl_offset: u64,
-    second_repl_offset: i64,
-    repl_backlog_active: u64,
-    repl_backlog_size: u64,
-    repl_backlog_first_byte_offset: u64,
-    repl_backlog_histlen: u64,
+    role: RwLock<String>,
+    connected_slaves: RwLock<u64>,
+    master_replid: RwLock<String>,
+    master_repl_offset: RwLock<u64>,
+    second_repl_offset: RwLock<i64>,
+    repl_backlog_active: RwLock<u64>,
+    repl_backlog_size: RwLock<u64>,
+    repl_backlog_first_byte_offset: RwLock<u64>,
+    repl_backlog_histlen: RwLock<u64>,
 }
 
 impl Info {
-    pub fn new(role: Role) -> Self {
+    pub fn new() -> Self {
         Info {
-            role,
-            connected_slaves: 0,
-            master_replid: String::new(),
-            master_repl_offset: 0,
-            second_repl_offset: 0,
-            repl_backlog_active: 0,
-            repl_backlog_size: 0,
-            repl_backlog_first_byte_offset: 0,
-            repl_backlog_histlen: 0,
+            role: RwLock::new("master".to_string()), // default role
+            connected_slaves: RwLock::new(0),
+            master_replid: RwLock::new("".to_string()),
+            master_repl_offset: RwLock::new(0),
+            second_repl_offset: RwLock::new(0),
+            repl_backlog_active: RwLock::new(0),
+            repl_backlog_size: RwLock::new(0),
+            repl_backlog_first_byte_offset: RwLock::new(0),
+            repl_backlog_histlen: RwLock::new(0),
         }
+    }
+
+    /// Sets the server's replication role ("master" or "slave")
+    pub async fn set_role(&self, role: &str) {
+        let mut r = self.role.write().await;
+        *r = role.to_string();
+    }
+
+    /// Increments connected slave count
+    pub async fn add_slave(&self) {
+        let mut count = self.connected_slaves.write().await;
+        *count += 1;
+    }
+
+    /// Decrements connected slave count safely
+    pub async fn remove_slave(&self) {
+        let mut count = self.connected_slaves.write().await;
+        if *count > 0 {
+            *count -= 1;
+        }
+    }
+
+    /// Sets replication id (used for partial resync)
+    pub async fn set_master_replid(&self, id: &str) {
+        let mut replid = self.master_replid.write().await;
+        *replid = id.to_string();
+    }
+
+    /// Sets replication offset
+    pub async fn set_master_repl_offset(&self, offset: u64) {
+        let mut off = self.master_repl_offset.write().await;
+        *off = offset;
+    }
+
+    /// Serializes `INFO replication` output like Redis
+    pub async fn serialize(&self) -> RedisValueRef {
+        let role = self.role.read().await.clone();
+        let connected_slaves = *self.connected_slaves.read().await;
+        let master_replid = self.master_replid.read().await.clone();
+        let master_repl_offset = *self.master_repl_offset.read().await;
+        let second_repl_offset = *self.second_repl_offset.read().await;
+        let backlog_active = *self.repl_backlog_active.read().await;
+        let backlog_size = *self.repl_backlog_size.read().await;
+        let backlog_first_byte_offset = *self.repl_backlog_first_byte_offset.read().await;
+        let backlog_histlen = *self.repl_backlog_histlen.read().await;
+
+        RedisValueRef::Array(vec![
+            RedisValueRef::BulkString(bytes::Bytes::from(format!("# Replication"))),
+            RedisValueRef::BulkString(bytes::Bytes::from(format!("role:{}", role))),
+            RedisValueRef::BulkString(bytes::Bytes::from(format!(
+                "connected_slaves:{}",
+                connected_slaves
+            ))),
+            RedisValueRef::BulkString(bytes::Bytes::from(format!(
+                "master_replid:{}",
+                master_replid
+            ))),
+            RedisValueRef::BulkString(bytes::Bytes::from(format!(
+                "master_repl_offset:{}",
+                master_repl_offset
+            ))),
+            RedisValueRef::BulkString(bytes::Bytes::from(format!(
+                "second_repl_offset:{}",
+                second_repl_offset
+            ))),
+            RedisValueRef::BulkString(bytes::Bytes::from(format!(
+                "repl_backlog_active:{}",
+                backlog_active
+            ))),
+            RedisValueRef::BulkString(bytes::Bytes::from(format!(
+                "repl_backlog_size:{}",
+                backlog_size
+            ))),
+            RedisValueRef::BulkString(bytes::Bytes::from(format!(
+                "repl_backlog_first_byte_offset:{}",
+                backlog_first_byte_offset
+            ))),
+            RedisValueRef::BulkString(bytes::Bytes::from(format!(
+                "repl_backlog_histlen:{}",
+                backlog_histlen
+            ))),
+        ])
     }
 }
 
@@ -41,6 +119,7 @@ pub struct Redis {
     pub lists: List,
     pub stream: Stream,
     pub tr: Transaction,
+    pub info: Info,
 }
 
 impl Redis {
@@ -50,6 +129,7 @@ impl Redis {
             lists: List::new(),
             stream: Stream::new(),
             tr: Transaction::new(),
+            info: Info::new(),
         }
     }
 }
