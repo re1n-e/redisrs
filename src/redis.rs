@@ -24,7 +24,7 @@ impl Info {
         Info {
             role: RwLock::new("master".to_string()), // default role
             connected_slaves: RwLock::new(0),
-            master_replid: RwLock::new("".to_string()),
+            master_replid: RwLock::new("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string()),
             master_repl_offset: RwLock::new(0),
             second_repl_offset: RwLock::new(0),
             repl_backlog_active: RwLock::new(0),
