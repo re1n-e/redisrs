@@ -3,7 +3,10 @@ use crate::rdb::KeyValue;
 use crate::resp::RedisValueRef;
 use crate::streams::Stream;
 use crate::transactions::Transaction;
+use bytes::Bytes;
+use std::fmt::Write;
 use tokio::sync::RwLock;
+
 pub struct Info {
     role: RwLock<String>,
     connected_slaves: RwLock<u64>,
@@ -75,42 +78,24 @@ impl Info {
         let backlog_first_byte_offset = *self.repl_backlog_first_byte_offset.read().await;
         let backlog_histlen = *self.repl_backlog_histlen.read().await;
 
-        RedisValueRef::Array(vec![
-            RedisValueRef::BulkString(bytes::Bytes::from(format!("# Replication"))),
-            RedisValueRef::BulkString(bytes::Bytes::from(format!("role:{}", role))),
-            RedisValueRef::BulkString(bytes::Bytes::from(format!(
-                "connected_slaves:{}",
-                connected_slaves
-            ))),
-            RedisValueRef::BulkString(bytes::Bytes::from(format!(
-                "master_replid:{}",
-                master_replid
-            ))),
-            RedisValueRef::BulkString(bytes::Bytes::from(format!(
-                "master_repl_offset:{}",
-                master_repl_offset
-            ))),
-            RedisValueRef::BulkString(bytes::Bytes::from(format!(
-                "second_repl_offset:{}",
-                second_repl_offset
-            ))),
-            RedisValueRef::BulkString(bytes::Bytes::from(format!(
-                "repl_backlog_active:{}",
-                backlog_active
-            ))),
-            RedisValueRef::BulkString(bytes::Bytes::from(format!(
-                "repl_backlog_size:{}",
-                backlog_size
-            ))),
-            RedisValueRef::BulkString(bytes::Bytes::from(format!(
-                "repl_backlog_first_byte_offset:{}",
-                backlog_first_byte_offset
-            ))),
-            RedisValueRef::BulkString(bytes::Bytes::from(format!(
-                "repl_backlog_histlen:{}",
-                backlog_histlen
-            ))),
-        ])
+        let mut s = String::new();
+        writeln!(s, "# Replication").unwrap();
+        writeln!(s, "role:{}", role).unwrap();
+        writeln!(s, "connected_slaves:{}", connected_slaves).unwrap();
+        writeln!(s, "master_replid:{}", master_replid).unwrap();
+        writeln!(s, "master_repl_offset:{}", master_repl_offset).unwrap();
+        writeln!(s, "second_repl_offset:{}", second_repl_offset).unwrap();
+        writeln!(s, "repl_backlog_active:{}", backlog_active).unwrap();
+        writeln!(s, "repl_backlog_size:{}", backlog_size).unwrap();
+        writeln!(
+            s,
+            "repl_backlog_first_byte_offset:{}",
+            backlog_first_byte_offset
+        )
+        .unwrap();
+        writeln!(s, "repl_backlog_histlen:{}", backlog_histlen).unwrap();
+
+        RedisValueRef::BulkString(Bytes::from(s))
     }
 }
 
