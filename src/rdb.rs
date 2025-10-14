@@ -113,16 +113,6 @@ impl<R: Read> RdbParser<R> {
         Ok(buf[0])
     }
 
-    fn peek_byte(&mut self) -> Result<u8, RdbError> {
-        if let Some(byte) = self.peeked_byte {
-            return Ok(byte);
-        }
-
-        let byte = self.read_byte()?;
-        self.peeked_byte = Some(byte);
-        Ok(byte)
-    }
-
     pub fn parse(&mut self) -> Result<RdbFile, RdbError> {
         // Parse header
         let version = self.parse_header()?;

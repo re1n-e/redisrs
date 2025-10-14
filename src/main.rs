@@ -47,13 +47,21 @@ async fn main() {
             _ => Ok(()),
         };
         let _ = match &args.replicaof {
-            Some(_) => redis.info.set_role("slave").await,
+            Some(replicaof) => {
+                let addr = replicaof.clone();
+                redis.info.set_role("slave").await;
+                let redis_clone = redis.clone();
+                let port_clone = port.clone();
+                tokio::spawn(async move {
+                    connect_to_master(redis_clone, &addr, &port_clone).await;
+                });
+            }
             _ => (),
         };
+
         match stream {
             Ok((stream, addr)) => {
                 println!("accepted new connection from: {addr}");
-
                 tokio::spawn(async move {
                     let mut framed = Framed::new(stream, RespParser);
 
@@ -80,6 +88,57 @@ async fn main() {
             Err(e) => {
                 println!("error: {}", e);
             }
+        }
+    }
+}
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
+    let (host, mport) = master_addr.split_once(' ').unwrap();
+    let addr = format!("{host}:{mport}");
+    println!("Connecting to master at {}", addr);
+
+    match tokio::net::TcpStream::connect(&addr).await {
+        Ok(mut stream) => {
+            println!("Connected to master");
+
+            // Step 1: Send PING
+            stream.write_all(b"*1\r\n$4\r\nPING\r\n").await.unwrap();
+            let mut buf = vec![0u8; 1024];
+            let n = stream.read(&mut buf).await.unwrap();
+            println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
+
+            // Step 2: Send REPLCONF listening-port
+            let cmd = format!(
+                "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${}\r\n{}\r\n",
+                port.len(),
+                port
+            );
+            stream.write_all(cmd.as_bytes()).await.unwrap();
+            let n = stream.read(&mut buf).await.unwrap();
+            println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
+
+            // Step 3: Send REPLCONF capa psync2
+            stream
+                .write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
+                .await
+                .unwrap();
+            let n = stream.read(&mut buf).await.unwrap();
+            println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
+
+            // Step 4: Send PSYNC ? -1
+            stream
+                .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
+                .await
+                .unwrap();
+            let n = stream.read(&mut buf).await.unwrap();
+            println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
+
+            // TODO: Parse and load the RDB file sent after FULLRESYNC
+        }
+        Err(e) => {
+            eprintln!("Failed to connect to master: {}", e);
         }
     }
 }
