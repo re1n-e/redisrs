@@ -1,5 +1,5 @@
 use clap::Parser;
-use futures::{SinkExt, StreamExt}; // Add this dependency
+use futures::{SinkExt, StreamExt};
 use redis::commands::handle_command;
 use redis::redis::Redis;
 use redis::resp::RespParser;
@@ -34,34 +34,35 @@ async fn main() {
         .await
         .unwrap();
     let redis = Arc::new(Redis::new());
-    loop {
-        let stream = listener.accept().await;
-        let redis = redis.clone();
-        let _ = match (&args.dir, &args.dbfilename) {
-            (Some(dir), Some(filename)) => {
-                redis
-                    .kv
-                    .load_from_rdb_file(dir.clone(), filename.clone())
-                    .await
-            }
-            _ => Ok(()),
-        };
-        let _ = match &args.replicaof {
-            Some(replicaof) => {
-                let addr = replicaof.clone();
-                redis.info.set_role("slave").await;
-                let redis_clone = redis.clone();
-                let port_clone = port.clone();
-                tokio::spawn(async move {
-                    connect_to_master(redis_clone, &addr, &port_clone).await;
-                });
-            }
-            _ => (),
-        };
 
-        match stream {
+    // Load RDB file ONCE before starting the server loop
+    let _ = match (&args.dir, &args.dbfilename) {
+        (Some(dir), Some(filename)) => {
+            redis
+                .kv
+                .load_from_rdb_file(dir.clone(), filename.clone())
+                .await
+        }
+        _ => Ok(()),
+    };
+
+    // Connect to master ONCE before starting the server loop
+    if let Some(replicaof) = &args.replicaof {
+        let addr = replicaof.clone();
+        redis.info.set_role("slave").await;
+        let redis_clone = redis.clone();
+        let port_clone = port.clone();
+        tokio::spawn(async move {
+            connect_to_master(redis_clone, &addr, &port_clone).await;
+        });
+    }
+
+    // Now accept connections in a loop
+    loop {
+        match listener.accept().await {
             Ok((stream, addr)) => {
                 println!("accepted new connection from: {addr}");
+                let redis = redis.clone();
                 tokio::spawn(async move {
                     let mut framed = Framed::new(stream, RespParser);
 
