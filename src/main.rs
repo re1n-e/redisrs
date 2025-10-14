@@ -68,6 +68,31 @@ async fn main() {
                     while let Some(result) = framed.next().await {
                         match result {
                             Ok(value) => {
+                                // Check if this is a PSYNC command
+                                if is_psync_command(&value) {
+                                    // Get the underlying stream back
+                                    let mut stream = framed.into_inner();
+
+                                    // Send FULLRESYNC response
+                                    let fullresync = format!(
+                                        "+FULLRESYNC {} {}\r\n",
+                                        redis.info.master_replid().await,
+                                        redis.info.master_repl_offset().await
+                                    );
+                                    stream.write_all(fullresync.as_bytes()).await.unwrap();
+
+                                    // Send RDB file
+                                    let empty_rdb = hex::decode("524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2").unwrap();
+                                    let rdb_response = format!("${}\r\n", empty_rdb.len());
+                                    stream.write_all(rdb_response.as_bytes()).await.unwrap();
+                                    stream.write_all(&empty_rdb).await.unwrap();
+
+                                    // Recreate framed for future commands
+                                    framed = Framed::new(stream, RespParser);
+                                    continue;
+                                }
+
+                                // Normal command handling
                                 if let Some(response) = handle_command(value, addr, &redis).await {
                                     if let Err(e) = framed.send(response).await {
                                         eprintln!("Failed to send response: {:?}", e);
@@ -90,6 +115,15 @@ async fn main() {
             }
         }
     }
+}
+
+fn is_psync_command(value: &redis::resp::RedisValueRef) -> bool {
+    if let redis::resp::RedisValueRef::Array(arr) = value {
+        if let Some(redis::resp::RedisValueRef::String(cmd)) = arr.get(0) {
+            return cmd.as_ref().eq_ignore_ascii_case(b"PSYNC");
+        }
+    }
+    false
 }
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -135,11 +169,7 @@ async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
             let n = stream.read(&mut buf).await.unwrap();
             println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
 
-            // TODO: Parse and load the RDB file sent after FULLRESYNC
-            let empty_rdb = hex::decode("524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2").unwrap();
-            let rdb_response = format!("${}\r\n", empty_rdb.len());
-            stream.write_all(rdb_response.as_bytes()).await.unwrap();
-            stream.write_all(&empty_rdb).await.unwrap();
+            //TODO Parse and load the RDB file sent after FULLRESYNC
         }
         Err(e) => {
             eprintln!("Failed to connect to master: {}", e);
