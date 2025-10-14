@@ -34,6 +34,16 @@ impl Info {
         }
     }
 
+    pub async fn master_replid(&self) -> String {
+        let r = self.master_replid.read().await;
+        (*r).clone()
+    }
+
+    pub async fn master_repl_offset(&self) -> u64 {
+        let r = self.master_repl_offset.read().await;
+        (*r).clone()
+    }
+
     /// Sets the server's replication role ("master" or "slave")
     pub async fn set_role(&self, role: &str) {
         let mut r = self.role.write().await;

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_util::codec::Framed;
 
-/// Simple CLI demo
 #[derive(Parser, Debug)]
 #[command(name = "myapp", version = "1.0", about = "port")]
 struct Args {
@@ -35,7 +34,7 @@ async fn main() {
         .unwrap();
     let redis = Arc::new(Redis::new());
 
-    // Load RDB file ONCE before starting the server loop
+    // Load RDB
     let _ = match (&args.dir, &args.dbfilename) {
         (Some(dir), Some(filename)) => {
             redis
@@ -46,7 +45,7 @@ async fn main() {
         _ => Ok(()),
     };
 
-    // Connect to master ONCE before starting the server loop
+    // Connect to master
     if let Some(replicaof) = &args.replicaof {
         let addr = replicaof.clone();
         redis.info.set_role("slave").await;
@@ -57,7 +56,7 @@ async fn main() {
         });
     }
 
-    // Now accept connections in a loop
+    //accept connections in a loop
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
@@ -104,13 +103,13 @@ async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
         Ok(mut stream) => {
             println!("Connected to master");
 
-            // Step 1: Send PING
+            //Send PING
             stream.write_all(b"*1\r\n$4\r\nPING\r\n").await.unwrap();
             let mut buf = vec![0u8; 1024];
             let n = stream.read(&mut buf).await.unwrap();
             println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
 
-            // Step 2: Send REPLCONF listening-port
+            //Send REPLCONF listening-port
             let cmd = format!(
                 "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${}\r\n{}\r\n",
                 port.len(),
@@ -120,7 +119,7 @@ async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
             let n = stream.read(&mut buf).await.unwrap();
             println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
 
-            // Step 3: Send REPLCONF capa psync2
+            //Send REPLCONF capa psync2
             stream
                 .write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
                 .await
@@ -128,7 +127,7 @@ async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
             let n = stream.read(&mut buf).await.unwrap();
             println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
 
-            // Step 4: Send PSYNC ? -1
+            //Send PSYNC ? -1
             stream
                 .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
                 .await

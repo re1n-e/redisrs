@@ -63,6 +63,11 @@ pub enum Command {
     },
     KEYS(Bytes),
     INFO(Bytes),
+    REPLCONF(Bytes),
+    PSYNC {
+        repl_id: Bytes,
+        offset: Bytes,
+    },
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -380,6 +385,29 @@ fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
             }
         }
 
+        "REPLCONF" => {
+            if let Some(RedisValueRef::String(port)) = arr.get(2) {
+                Some(Command::REPLCONF(port.clone()))
+            } else {
+                None
+            }
+        }
+
+        "PSYNC" => {
+            if let Some(RedisValueRef::String(master_id)) = arr.get(1) {
+                if let Some(RedisValueRef::String(offset)) = arr.get(2) {
+                    Some(Command::PSYNC {
+                        repl_id: master_id.clone(),
+                        offset: offset.clone(),
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+
         "MULTI" => Some(Command::MULTI),
         "EXEC" => Some(Command::EXEC),
         "DISCARD" => Some(Command::DISCARD),
@@ -499,6 +527,16 @@ async fn execute_command(cmd: Command, redis: &Arc<Redis>) -> Option<RedisValueR
         Command::KEYS(pattern) => Some(redis.kv.keys(pattern).await),
 
         Command::INFO(_repl) => Some(redis.info.serialize().await),
+
+        Command::REPLCONF(_) => Some(RedisValueRef::String(Bytes::from(String::from("OK")))),
+        Command::PSYNC { repl_id, offset } => {
+            let response = format!(
+                "FULLRESYNC {} {}",
+                redis.info.master_replid().await,
+                redis.info.master_repl_offset().await
+            );
+            Some(RedisValueRef::String(Bytes::from(response)))
+        }
 
         // Transaction commands should never reach here
         Command::MULTI | Command::EXEC | Command::DISCARD => None,
