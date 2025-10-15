@@ -612,6 +612,7 @@ async fn write_to_slaves(redis: &Arc<Redis>, arr: &[RedisValueRef]) {
     for idx in dead_indices.iter().rev() {
         slaves.remove(*idx);
         redis.info.remove_slave().await;
+        println!("Removed slave");
     }
 }
 
