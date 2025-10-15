@@ -3,7 +3,6 @@ use crate::resp::RedisValueRef;
 use bytes::Bytes;
 use core::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
 use tokio::time::Duration;
 
 pub enum Command {
