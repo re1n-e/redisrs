@@ -361,28 +361,34 @@ impl<R: Read> RdbParser<R> {
         let size = self.parse_length()?;
 
         match size {
-            0xC0 => {
+            192 => {
+                // 0xC0 as u64
                 // 8-bit integer
                 let byte = self.read_byte()?;
                 Ok(byte.to_string())
             }
-            0xC1 => {
+            193 => {
+                // 0xC1 as u64
                 // 16-bit integer (little-endian)
                 let mut bytes = [0u8; 2];
                 self.reader.read_exact(&mut bytes)?;
                 let val = u16::from_le_bytes(bytes);
                 Ok(val.to_string())
             }
-            0xC2 => {
+            194 => {
+                // 0xC2 as u64
                 // 32-bit integer (little-endian)
                 let mut bytes = [0u8; 4];
                 self.reader.read_exact(&mut bytes)?;
                 let val = u32::from_le_bytes(bytes);
                 Ok(val.to_string())
             }
-            0xC3 => Err(RdbError::InvalidFormat(
-                "LZF-compressed strings not supported".to_string(),
-            )),
+            195 => {
+                // 0xC3 as u64
+                return Err(RdbError::InvalidFormat(
+                    "LZF-compressed strings not supported".to_string(),
+                ));
+            }
             len => {
                 // Regular string
                 let mut buf = vec![0u8; len as usize];
