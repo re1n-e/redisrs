@@ -142,7 +142,7 @@ fn is_psync_command(value: &redis::resp::RedisValueRef) -> bool {
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-async fn connect_to_master(redis: Arc<Redis>, master_addr: &str, port: &str) {
+async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
     let (host, mport) = master_addr.split_once(' ').unwrap();
     let addr = format!("{host}:{mport}");
     println!("Connecting to master at {}", addr);
@@ -184,8 +184,7 @@ async fn connect_to_master(redis: Arc<Redis>, master_addr: &str, port: &str) {
             println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
 
             //TODO Parse and load the RDB file sent after FULLRESYNC
-            let n = stream.read(&mut buf).await.unwrap();
-            redis.kv.load_from_rdb(&buf[..n]).await.unwrap();
+            
         }
         Err(e) => {
             eprintln!("Failed to connect to master: {}", e);
