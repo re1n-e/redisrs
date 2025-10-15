@@ -3,6 +3,7 @@ use crate::resp::RedisValueRef;
 use bytes::Bytes;
 use core::net::SocketAddr;
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
 use tokio::time::Duration;
 
 pub enum Command {
@@ -63,6 +64,35 @@ pub enum Command {
     KEYS(Bytes),
     INFO(Bytes),
     REPLCONF(Bytes),
+}
+
+fn is_write_cmnd(cmd: &Command) -> bool {
+    match cmd {
+        Command::Ping
+        | Command::Echo(_)
+        | Command::Get(_)
+        | Command::LLEN(_)
+        | Command::LRANGE { .. }
+        | Command::TYPE(_)
+        | Command::XRANGE { .. }
+        | Command::XREAD { .. }
+        | Command::KEYS(_)
+        | Command::INFO(_)
+        | Command::REPLCONF(_) => false,
+
+        // Write commands
+        Command::Set { .. }
+        | Command::RPUSH { .. }
+        | Command::LPUSH { .. }
+        | Command::LPOP { .. }
+        | Command::BLPOP { .. }
+        | Command::XADD { .. }
+        | Command::INCR(_)
+        | Command::MULTI
+        | Command::EXEC
+        | Command::DISCARD
+        | Command::CONFIG { .. } => true,
+    }
 }
 
 fn parse_command(arr: &[RedisValueRef]) -> Option<Command> {
@@ -509,7 +539,6 @@ async fn execute_command(cmd: Command, redis: &Arc<Redis>) -> Option<RedisValueR
         Command::INFO(_repl) => Some(redis.info.serialize().await),
 
         Command::REPLCONF(_) => Some(RedisValueRef::String(Bytes::from(String::from("OK")))),
-
         // Transaction commands should never reach here
         Command::MULTI | Command::EXEC | Command::DISCARD => None,
     }
@@ -526,6 +555,15 @@ pub async fn handle_command(
     };
 
     let parsed_command = parse_command(arr)?;
+
+    // Broadcast write commands to all slaves
+    if is_write_cmnd(&parsed_command) {
+        let redis = redis.clone();
+        let arr = arr.clone();
+        tokio::spawn(async move {
+            write_to_slaves(&redis, &arr).await;
+        });
+    }
 
     // Handle transaction control commands immediately
     match parsed_command {
@@ -557,4 +595,52 @@ pub async fn handle_command(
     }
 
     execute_command(parsed_command, redis).await
+}
+
+async fn write_to_slaves(redis: &Arc<Redis>, arr: &[RedisValueRef]) {
+    let resp_bytes = serialize_to_resp(arr);
+
+    let mut slaves = redis.connected_slaves.lock().await;
+    let mut dead_indices = Vec::new();
+
+    for (idx, slave_tx) in slaves.iter_mut().enumerate() {
+        if slave_tx.send(resp_bytes.clone()).await.is_err() {
+            dead_indices.push(idx);
+        }
+    }
+
+    // Remove dead connections in reverse order
+    for idx in dead_indices.iter().rev() {
+        slaves.remove(*idx);
+        redis.info.remove_slave().await;
+    }
+}
+
+fn serialize_to_resp(arr: &[RedisValueRef]) -> Vec<u8> {
+    let mut result = Vec::new();
+    result.extend_from_slice(format!("*{}\r\n", arr.len()).as_bytes());
+
+    for item in arr {
+        match item {
+            RedisValueRef::String(s) => {
+                result.extend_from_slice(format!("${}\r\n", s.len()).as_bytes());
+                result.extend_from_slice(s);
+                result.extend_from_slice(b"\r\n");
+            }
+            RedisValueRef::BulkString(b) => {
+                result.extend_from_slice(format!("${}\r\n", b.len()).as_bytes());
+                result.extend_from_slice(b);
+                result.extend_from_slice(b"\r\n");
+            }
+            RedisValueRef::Int(i) => {
+                result.extend_from_slice(format!(":{}\r\n", i).as_bytes());
+            }
+            RedisValueRef::Array(nested) => {
+                result.extend_from_slice(&serialize_to_resp(nested));
+            }
+            _ => {}
+        }
+    }
+
+    result
 }

@@ -5,6 +5,7 @@ use redis::redis::Redis;
 use redis::resp::RespParser;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio_util::codec::Framed;
 
 #[derive(Parser, Debug)]
@@ -70,8 +71,10 @@ async fn main() {
                             Ok(value) => {
                                 // Check if this is a PSYNC command
                                 if is_psync_command(&value) {
-                                    // Get the underlying stream back
                                     let mut stream = framed.into_inner();
+
+                                    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(100);
+                                    redis.add_slave(tx).await;
 
                                     // Send FULLRESYNC response
                                     let fullresync = format!(
@@ -87,9 +90,20 @@ async fn main() {
                                     stream.write_all(rdb_response.as_bytes()).await.unwrap();
                                     stream.write_all(&empty_rdb).await.unwrap();
 
-                                    // Recreate framed for future commands
-                                    framed = Framed::new(stream, RespParser);
-                                    continue;
+                                    // Spawn task to forward messages from channel to slave
+                                    tokio::spawn(async move {
+                                        while let Some(data) = rx.recv().await {
+                                            if stream.write_all(&data).await.is_err() {
+                                                println!(
+                                                    "Failed to write to slave, connection closed"
+                                                );
+                                                break;
+                                            }
+                                        }
+                                    });
+
+                                    // Stop processing this connection as a normal client
+                                    break;
                                 }
 
                                 // Normal command handling
@@ -128,7 +142,7 @@ fn is_psync_command(value: &redis::resp::RedisValueRef) -> bool {
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
+async fn connect_to_master(redis: Arc<Redis>, master_addr: &str, port: &str) {
     let (host, mport) = master_addr.split_once(' ').unwrap();
     let addr = format!("{host}:{mport}");
     println!("Connecting to master at {}", addr);
@@ -170,6 +184,8 @@ async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
             println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
 
             //TODO Parse and load the RDB file sent after FULLRESYNC
+            let n = stream.read(&mut buf).await.unwrap();
+            redis.kv.load_from_rdb(&buf[..n]).await.unwrap();
         }
         Err(e) => {
             eprintln!("Failed to connect to master: {}", e);

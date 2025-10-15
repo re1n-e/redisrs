@@ -5,8 +5,9 @@ use crate::streams::Stream;
 use crate::transactions::Transaction;
 use bytes::Bytes;
 use std::fmt::Write;
-use tokio::sync::RwLock;
-
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::sync::{Mutex, RwLock};
 pub struct Info {
     role: RwLock<String>,
     connected_slaves: RwLock<u64>,
@@ -22,7 +23,7 @@ pub struct Info {
 impl Info {
     pub fn new() -> Self {
         Info {
-            role: RwLock::new("master".to_string()), // default role
+            role: RwLock::new("master".to_string()),
             connected_slaves: RwLock::new(0),
             master_replid: RwLock::new("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string()),
             master_repl_offset: RwLock::new(0),
@@ -44,19 +45,16 @@ impl Info {
         (*r).clone()
     }
 
-    /// Sets the server's replication role ("master" or "slave")
     pub async fn set_role(&self, role: &str) {
         let mut r = self.role.write().await;
         *r = role.to_string();
     }
 
-    /// Increments connected slave count
     pub async fn add_slave(&self) {
         let mut count = self.connected_slaves.write().await;
         *count += 1;
     }
 
-    /// Decrements connected slave count safely
     pub async fn remove_slave(&self) {
         let mut count = self.connected_slaves.write().await;
         if *count > 0 {
@@ -64,19 +62,16 @@ impl Info {
         }
     }
 
-    /// Sets replication id (used for partial resync)
     pub async fn set_master_replid(&self, id: &str) {
         let mut replid = self.master_replid.write().await;
         *replid = id.to_string();
     }
 
-    /// Sets replication offset
     pub async fn set_master_repl_offset(&self, offset: u64) {
         let mut off = self.master_repl_offset.write().await;
         *off = offset;
     }
 
-    /// Serializes `INFO replication` output like Redis
     pub async fn serialize(&self) -> RedisValueRef {
         let role = self.role.read().await.clone();
         let connected_slaves = *self.connected_slaves.read().await;
@@ -115,16 +110,32 @@ pub struct Redis {
     pub stream: Stream,
     pub tr: Transaction,
     pub info: Info,
+    pub connected_slaves: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>,
 }
 
 impl Redis {
     pub fn new() -> Self {
-        Redis {
+        Self {
             kv: KeyValue::new(),
             lists: List::new(),
             stream: Stream::new(),
             tr: Transaction::new(),
             info: Info::new(),
+            connected_slaves: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub async fn add_slave(&self, tx: mpsc::Sender<Vec<u8>>) {
+        let mut slaves = self.connected_slaves.lock().await;
+        slaves.push(tx);
+        self.info.add_slave().await;
+    }
+
+    pub async fn remove_dead_slave(&self, idx: usize) {
+        let mut slaves = self.connected_slaves.lock().await;
+        if idx < slaves.len() {
+            slaves.remove(idx);
+            self.info.remove_slave().await;
         }
     }
 }

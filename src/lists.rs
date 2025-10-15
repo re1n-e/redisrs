@@ -53,7 +53,6 @@ impl List {
         let mut blocked_clients = self.blocked.write().await;
         if let Some(notifiers) = blocked_clients.get_mut(key) {
             if let Some(notifier) = notifiers.pop_front() {
-                println!("Wake up client");
                 let _ = notifier.send(true);
                 if notifiers.is_empty() {
                     blocked_clients.remove(key);
@@ -158,7 +157,6 @@ impl List {
                 .entry(key.clone())
                 .or_default()
                 .push_back(tx);
-            println!("Blocked clients len: {}", blocked_clients.len());
         }
 
         match timeout(duration, rx).await {
