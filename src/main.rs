@@ -52,9 +52,7 @@ async fn main() {
         redis.info.set_role("slave").await;
         let redis_clone = redis.clone();
         let port_clone = port.clone();
-        tokio::spawn(async move {
-            connect_to_master(redis_clone, &addr, &port_clone).await;
-        });
+        connect_to_master(redis_clone, &addr, &port_clone).await;
     }
 
     //accept connections in a loop
