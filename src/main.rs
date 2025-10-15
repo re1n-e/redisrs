@@ -82,27 +82,44 @@ async fn main() {
                                         redis.info.master_replid().await,
                                         redis.info.master_repl_offset().await
                                     );
-                                    stream.write_all(fullresync.as_bytes()).await.unwrap();
+                                    if stream.write_all(fullresync.as_bytes()).await.is_err() {
+                                        eprintln!("Failed to send FULLRESYNC to slave");
+                                        break;
+                                    }
 
                                     // Send RDB file
                                     let empty_rdb = hex::decode("524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2").unwrap();
                                     let rdb_response = format!("${}\r\n", empty_rdb.len());
-                                    stream.write_all(rdb_response.as_bytes()).await.unwrap();
-                                    stream.write_all(&empty_rdb).await.unwrap();
+                                    if stream.write_all(rdb_response.as_bytes()).await.is_err() {
+                                        eprintln!("Failed to send RDB response to slave");
+                                        break;
+                                    }
+                                    if stream.write_all(&empty_rdb).await.is_err() {
+                                        eprintln!("Failed to send RDB file to slave");
+                                        break;
+                                    }
 
                                     // Spawn task to forward messages from channel to slave
+                                    // This task keeps the stream alive and forwards commands
                                     tokio::spawn(async move {
                                         while let Some(data) = rx.recv().await {
-                                            if stream.write_all(&data).await.is_err() {
-                                                println!(
-                                                    "Failed to write to slave, connection closed"
-                                                );
-                                                break;
+                                            match stream.write_all(&data).await {
+                                                Ok(_) => {
+                                                    let _ = stream.flush().await;
+                                                }
+                                                Err(e) => {
+                                                    println!(
+                                                        "Failed to write to slave, connection closed: {}",
+                                                        e
+                                                    );
+                                                    break;
+                                                }
                                             }
                                         }
+                                        println!("Slave connection handler task ended");
                                     });
 
-                                    // Stop processing this connection as a normal client
+                                    // Exit the main connection loop - the spawned task now owns the stream
                                     break;
                                 }
 
@@ -142,7 +159,7 @@ fn is_psync_command(value: &redis::resp::RedisValueRef) -> bool {
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
+async fn connect_to_master(redis: Arc<Redis>, master_addr: &str, port: &str) {
     let (host, mport) = master_addr.split_once(' ').unwrap();
     let addr = format!("{host}:{mport}");
     println!("Connecting to master at {}", addr);
@@ -184,7 +201,8 @@ async fn connect_to_master(_redis: Arc<Redis>, master_addr: &str, port: &str) {
             println!("Master replied: {}", String::from_utf8_lossy(&buf[..n]));
 
             //TODO Parse and load the RDB file sent after FULLRESYNC
-            
+            let n = stream.read(&mut buf).await.unwrap();
+            redis.kv.load_from_rdb(&buf[..n]).await.unwrap();
         }
         Err(e) => {
             eprintln!("Failed to connect to master: {}", e);
