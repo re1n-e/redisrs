@@ -200,7 +200,7 @@ async fn connect_to_master(redis: Arc<Redis>, master_addr: &str, port: &str) {
 
             //TODO Parse and load the RDB file sent after FULLRESYNC
             let n = stream.read(&mut buf).await.unwrap();
-            //redis.kv.load_from_rdb(&buf[..n]).await.unwrap();
+            redis.kv.load_from_rdb(&buf[..n]).await.unwrap();
         }
         Err(e) => {
             eprintln!("Failed to connect to master: {}", e);
